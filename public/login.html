@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INFRAMEN - Iniciar sesión</title>
+<link rel="icon" href="logo/logo1.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="login-pagina">
+<form class="card login" id="f">
+  <div class="logo"><img src="logo/logo1.png" alt="Alacrán Solidario"><b>INFRAMEN</b></div>
+  <p>Instituto Nacional Francisco Menéndez · Control de horas</p>
+  <div class="campo-f"><label>NIE / código</label><input id="nie" inputmode="numeric" maxlength="15" required autofocus></div>
+  <div class="campo-f"><label>PIN (4 números)</label><div class="con-ojo"><input id="pin" type="password" inputmode="numeric" maxlength="4" required autocomplete="current-password">
+    <button type="button" class="ojo" id="ojo" aria-label="Mostrar PIN" title="Mostrar PIN"></button></div></div>
+  <div class="error" id="err"></div>
+  <button class="btn block">Entrar</button>
+</form>
+<script>
+const $ = s => document.querySelector(s);
+$('#nie').oninput = e => { e.target.value = e.target.value.replace(/\D/g, ''); };
+$('#pin').oninput = e => { e.target.value = e.target.value.replace(/\D/g, ''); };
+// Ojito: muestra u oculta el PIN mientras se escribe
+const OJO = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const OJO_X = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+$('#ojo').innerHTML = OJO;
+$('#ojo').onclick = () => {
+  const ver = $('#pin').type === 'password';
+  $('#pin').type = ver ? 'text' : 'password';
+  $('#ojo').innerHTML = ver ? OJO_X : OJO;
+  $('#ojo').title = $('#ojo').ariaLabel = ver ? 'Ocultar PIN' : 'Mostrar PIN';
+  $('#pin').focus();
+};
+$('#f').onsubmit = async e => {
+  e.preventDefault(); $('#err').textContent = '';
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nie: $('#nie').value, pin: $('#pin').value }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'No se pudo iniciar sesión');
+    location.replace('index.html');
+  } catch (err) { $('#err').textContent = err.message; }
+};
+</script>
+</body>
+</html>
