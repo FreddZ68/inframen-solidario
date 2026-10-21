@@ -1,0 +1,4 @@
+node_modules
+.env
+scripts/alumnos.csv
+scripts/pines.csv
