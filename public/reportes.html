@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INFRAMEN - Reportes y Estadísticas</title>
+<link rel="icon" href="logo/logo1.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="reportes">
+<div id="nav"></div>
+<main>
+<div class="titulo"><div><h1>Reportes y Estadísticas</h1><p>Consulta el rendimiento, las horas y la asistencia de los estudiantes.</p></div>
+<div class="filtros" style="margin:0;padding:0;margin-left:auto;gap:10px">
+  <input type="date" id="rd" aria-label="Desde"><input type="date" id="rh" aria-label="Hasta"><select id="rs" aria-label="Sección"></select></div></div>
+<div class="kpis" id="kpis"></div>
+<div class="graf-grid">
+  <div class="card bloque"><h2>Asistencia por sección</h2>
+    <div class="chart"><div class="eje"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div><div class="plot" id="plot"></div></div>
+    <div class="etiquetas" id="etq"></div></div>
+  <div class="card bloque"><h2>Distribución de asistencia</h2>
+    <div class="donut-wrap"><div class="donut" id="donut"><i><b id="dtot">0</b><small>Registros</small></i></div><ul class="leyenda" id="ley"></ul></div></div>
+</div>
+<div class="card bloque" style="margin-bottom:18px"><h2>Avance de horas por sección <small style="color:var(--gris);font-weight:400" id="metaTxt"></small></h2><div id="avance"></div></div>
+<div class="fila-abajo">
+  <div class="card bloque"><h2>Actividad reciente</h2>
+    <div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Fecha</th><th>Descripción</th><th>Tipo</th><th>Asistencia</th></tr></thead><tbody id="act"></tbody></table></div></div>
+  <div class="card bloque"><h2>Acciones rápidas</h2><div class="rapidas">
+    <button class="btn claro block" id="gen" data-ico="chart">Generar reporte académico</button>
+    <button class="btn claro block" id="exp" data-ico="download">Exportar datos (CSV)</button>
+    <a class="btn claro block" href="asistencia.html" data-ico="eye">Ver detalles</a></div></div>
+</div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<script src="common.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
