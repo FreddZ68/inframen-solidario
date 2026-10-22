@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INFRAMEN - Gestión de Usuarios</title>
+<link rel="icon" href="logo/logo1.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="usuarios">
+<div id="nav"></div>
+<main>
+<div class="titulo"><div><h1>Gestión de Usuarios</h1><p>Administra las cuentas del sistema: estudiantes, docentes y administradores.</p></div>
+<button class="btn accion" id="nuevo" data-ico="plus">Nuevo estudiante</button></div>
+<div class="tabs" id="tabs"></div>
+<div class="card filtros">
+  <div class="buscar grow"><span data-ico="search"></span><input id="q" placeholder="Buscar por nombre, correo o NIE/código..."></div>
+  <select id="fesp"><option value="">Todas las especialidades</option></select>
+  <select id="fsec"><option value="">Todas las secciones</option></select>
+  <select id="fest"><option value="">Todos los estados</option><option value="1">Activo</option><option value="0">Inactivo</option></select>
+</div>
+<div class="card bloque"><h2 id="ttabla">Estudiantes</h2>
+<div class="tabla-scroll"><table class="tabla-cards"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
+<div class="pie-tabla"><span id="info"></span><div class="pag" id="pag"></div></div></div>
+</main>
+<script src="common.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

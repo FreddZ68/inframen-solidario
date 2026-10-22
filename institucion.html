@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INFRAMEN - Gestión de la Institución</title>
+<link rel="icon" href="logo/logo1.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="institucion">
+<div id="nav"></div>
+<main>
+<div class="titulo"><div><h1>Gestión de la Institución</h1><p>Define la meta de horas, los proyectos y las actividades que se pueden registrar.</p></div></div>
+<div class="card bloque" style="margin-bottom:18px"><h2>Parámetros generales</h2>
+<form id="fconf"><div class="form-fila">
+  <div><label>Meta de horas por estudiante</label><input type="number" id="fmeta" min="1" max="2000" step="1" required></div>
+  <div><label>Máximo de horas por semana</label><input type="number" id="fmax" min="0" max="40" step="0.1" required><small style="color:var(--gris);font-size:12px">0 = sin límite semanal</small></div>
+  <div class="doble"><label>Nombre de la institución</label><input id="finst" maxlength="120" required></div></div>
+  <button class="btn" data-ico="save">Guardar configuración</button></form>
+  <p class="aviso-txt" style="text-align:left;margin-top:12px">La meta se usa en el progreso de los estudiantes y habilita la constancia. El nombre aparece en la barra superior y en las constancias.</p></div>
+<div class="dos-igual">
+  <div class="card bloque"><h2>Proyectos <button class="btn" id="nproy" data-ico="plus">Nuevo proyecto</button></h2>
+    <div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Proyecto</th><th>Actividades</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="tbp"></tbody></table></div></div>
+  <div class="card bloque"><h2>Actividades <button class="btn" id="nact" data-ico="plus">Nueva actividad</button></h2>
+    <div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Actividad</th><th>Proyecto</th><th>Usos</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="tba"></tbody></table></div></div>
+</div>
+</main>
+<script src="common.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
