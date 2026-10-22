@@ -21,6 +21,10 @@ const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  port: Number(process.env.DB_PORT) || 3306,   // TiDB Cloud usa 4000
+  // TiDB Cloud (y la mayoría de bases en la nube) exigen conexión segura (TLS)
+  ssl: (process.env.DB_SSL === 'true' || /tidbcloud\.com$/i.test(process.env.DB_HOST || ''))
+    ? { minVersion: 'TLSv1.2', rejectUnauthorized: true } : undefined,
 });
 
 /* ================== Constantes y validaciones ================== */
