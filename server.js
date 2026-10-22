@@ -591,7 +591,7 @@ app.put('/api/admin/config', ADMIN, async (req, res) => {
     const meta = Number(req.body.meta_horas), max = Number(req.body.max_horas_semana);
     const inst = limpiarTexto(req.body.institucion, 120);
     if (!Number.isInteger(meta) || meta < 1 || meta > 2000) throw new ErrUsuario('La meta de horas debe ser un número entero entre 1 y 2000');
-    if (!Number.isFinite(max) || max < 0 || max > 40 || !Number.isInteger(max * 2)) throw new ErrUsuario('El máximo semanal debe estar entre 0 y 40 (en pasos de 0.5). Usa 0 para no tener límite');
+    if (!Number.isFinite(max) || max < 0 || max > 150 || !Number.isInteger(max * 2)) throw new ErrUsuario('El máximo semanal debe estar entre 0 y 150 (en pasos de 0.5). Usa 0 para no tener límite');
     if (inst.length < 3) throw new ErrUsuario('Escribe el nombre de la institución');
     await guardarConfig(pool, 'meta_horas', meta);
     await guardarConfig(pool, 'max_horas_semana', max);
@@ -838,10 +838,10 @@ async function datosRegistro(b, db = pool) {
   return { fecha, descripcion, estado, actividadId, actividad };
 }
 
-const horasOk = h => Number.isFinite(h) && h > 0 && h <= 24 && Number.isInteger(h * 2);
+const horasOk = h => Number.isFinite(h) && h > 0 && h <= 150 && Number.isInteger(h * 2);
 
 async function insertarHoras(conn, a, d, horas, userId, cfg) {
-  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben ser un número positivo en pasos de 0.5');
+  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben estar entre 0.5 y 150, en pasos de 0.5');
   const cupo = await cupoAlumno(conn, a.id, d.fecha, cfg);
   if (horas > cupo) throw new ErrUsuario(`${a.nombre} solo puede registrar ${cupo} h en esa semana (límite semanal del estudiante o meta de ${cfg.meta_horas} h)`);
   await conn.query(
@@ -1029,8 +1029,8 @@ app.put('/api/docente/alumnos/:id/limite', STAFF, async (req, res) => {
     if (limite === null || limite === undefined || limite === '') limite = null;
     else {
       limite = Number(limite);
-      if (!Number.isFinite(limite) || limite < 0.5 || limite > 40 || !Number.isInteger(limite * 2)) {
-        throw new ErrUsuario('El límite semanal debe estar entre 0.5 y 40 horas, en pasos de 0.5');
+      if (!Number.isFinite(limite) || limite < 0.5 || limite > 159 || !Number.isInteger(limite * 2)) {
+        throw new ErrUsuario('El límite semanal debe estar entre 0.5 y 150 horas, en pasos de 0.5');
       }
     }
     await pool.query('UPDATE usuarios SET limite_semanal = ? WHERE id = ?', [limite, id]);
