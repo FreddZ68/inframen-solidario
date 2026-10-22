@@ -591,7 +591,7 @@ app.put('/api/admin/config', ADMIN, async (req, res) => {
     const meta = Number(req.body.meta_horas), max = Number(req.body.max_horas_semana);
     const inst = limpiarTexto(req.body.institucion, 120);
     if (!Number.isInteger(meta) || meta < 1 || meta > 2000) throw new ErrUsuario('La meta de horas debe ser un número entero entre 1 y 2000');
-    if (!Number.isFinite(max) || max < 0 || max > 150 || !Number.isInteger(max * 2)) throw new ErrUsuario('El máximo semanal debe estar entre 0 y 150 (en pasos de 0.5). Usa 0 para no tener límite');
+    if (!Number.isFinite(max) || max < 0 || max > 150 || !decimas(max)) throw new ErrUsuario('El máximo semanal debe estar entre 0 y 150 (con un decimal, por ejemplo 2.3). Usa 0 para no tener límite');
     if (inst.length < 3) throw new ErrUsuario('Escribe el nombre de la institución');
     await guardarConfig(pool, 'meta_horas', meta);
     await guardarConfig(pool, 'max_horas_semana', max);
@@ -817,7 +817,7 @@ async function cupoAlumno(db, alumnoId, fecha, cfg) {
   const limite = await limiteAlumno(db, alumnoId, cfg);
   const porMeta = cfg.meta_horas - Number(tot.h);
   const porSemana = limite > 0 ? limite - Number(sem.h) : Infinity;
-  return Math.max(0, Math.min(porMeta, porSemana));
+  return Math.max(0, Math.round(Math.min(porMeta, porSemana) * 10) / 10);   // redondeo a décimas (evita 1.1999999)
 }
 
 // Valida y normaliza los datos comunes de un registro de horas (fecha, actividad, descripción, estado)
@@ -838,10 +838,11 @@ async function datosRegistro(b, db = pool) {
   return { fecha, descripcion, estado, actividadId, actividad };
 }
 
-const horasOk = h => Number.isFinite(h) && h > 0 && h <= 150 && Number.isInteger(h * 2);
+const decimas = n => Math.abs(n * 10 - Math.round(n * 10)) < 1e-6;   // se aceptan décimas: 2.3, 1.5, 0.1...
+const horasOk = h => Number.isFinite(h) && h > 0 && h <= 150 && decimas(h);
 
 async function insertarHoras(conn, a, d, horas, userId, cfg) {
-  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben estar entre 0.5 y 150, en pasos de 0.5');
+  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben estar entre 0.1 y 150 (con un decimal, por ejemplo 2.3)');
   const cupo = await cupoAlumno(conn, a.id, d.fecha, cfg);
   if (horas > cupo) throw new ErrUsuario(`${a.nombre} solo puede registrar ${cupo} h en esa semana (límite semanal del estudiante o meta de ${cfg.meta_horas} h)`);
   await conn.query(
@@ -972,7 +973,7 @@ app.post('/api/docente/horas/validar-fecha', STAFF, async (req, res) => {
       const [[sem]] = await conn.query("SELECT COALESCE(SUM(horas),0) AS h FROM registro_horas WHERE alumno_id = ? AND estado = 'validado' AND YEARWEEK(fecha,1) = YEARWEEK(?,1)", [aid, fecha]);
       let acum = Number(sem.h);
       for (const r of pend) {
-        if (limite > 0 && acum + Number(r.horas) > limite) { omitidos++; continue; }   // pasaría el máximo semanal
+        if (limite > 0 && Math.round((acum + Number(r.horas)) * 10) / 10 > limite) { omitidos++; continue; }   // pasaría el máximo semanal
         await conn.query("UPDATE registro_horas SET estado = 'validado', revisado_por = ?, revisado_en = NOW() WHERE id = ?", [u.id, r.id]);
         acum += Number(r.horas); n++; h += Number(r.horas);
       }
@@ -1019,7 +1020,7 @@ app.delete('/api/docente/horas/:id', STAFF, async (req, res) => {
 });
 
 // Excepción por estudiante: el docente sube (o quita) el límite semanal de horas de un estudiante de sus secciones.
-// limite = número en pasos de 0.5 (0.5 a 40), o null para volver al límite general de la institución.
+// limite = número con un decimal (0.1 a 40), o null para volver al límite general de la institución.
 app.put('/api/docente/alumnos/:id/limite', STAFF, async (req, res) => {
   try {
     const id = idOk(req.params.id);
@@ -1029,8 +1030,8 @@ app.put('/api/docente/alumnos/:id/limite', STAFF, async (req, res) => {
     if (limite === null || limite === undefined || limite === '') limite = null;
     else {
       limite = Number(limite);
-      if (!Number.isFinite(limite) || limite < 0.5 || limite > 159 || !Number.isInteger(limite * 2)) {
-        throw new ErrUsuario('El límite semanal debe estar entre 0.5 y 150 horas, en pasos de 0.5');
+      if (!Number.isFinite(limite) || limite < 0.1 || limite > 150 || !decimas(limite)) {
+        throw new ErrUsuario('El límite semanal debe estar entre 0.1 y 150 horas (con un decimal)');
       }
     }
     await pool.query('UPDATE usuarios SET limite_semanal = ? WHERE id = ?', [limite, id]);
