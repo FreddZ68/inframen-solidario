@@ -143,7 +143,7 @@ const ambito = (u, alias = 's') => u.rol === 'docente'
 // Devuelve los datos del alumno si el usuario puede trabajar con él
 async function alumnoPermitido(u, alumnoId, db = pool) {
   const [[a]] = await db.query(`
-    SELECT x.id, x.nie, x.nombre, x.activo, x.limite_semanal, s.id AS seccion_id, s.especialidad, s.seccion
+    SELECT x.id, x.nie, x.nombre, x.activo, x.limite_semanal, s.id AS seccion_id, s.especialidad, s.seccion, s.anio
     FROM usuarios x
     LEFT JOIN alumno_seccion al ON al.alumno_id = x.id
     LEFT JOIN secciones s ON s.id = al.seccion_id
@@ -258,12 +258,17 @@ app.get('/api/admin/usuarios', ADMIN, async (req, res) => {
         (SELECT a.seccion_id FROM alumno_seccion a WHERE a.alumno_id = u.id LIMIT 1) AS seccion_id,
         CASE
           WHEN u.rol = 'alumno' THEN
-            (SELECT CONCAT(s.especialidad, ' ', s.seccion) FROM alumno_seccion a
+            (SELECT CONCAT(s.especialidad, ' ', s.seccion, ' (', s.anio, ')') FROM alumno_seccion a
              JOIN secciones s ON s.id = a.seccion_id WHERE a.alumno_id = u.id LIMIT 1)
           WHEN u.rol = 'docente' THEN
-            (SELECT GROUP_CONCAT(CONCAT(s.especialidad, ' ', s.seccion) ORDER BY s.seccion SEPARATOR ', ')
+            (SELECT GROUP_CONCAT(CONCAT(s.especialidad, ' ', s.seccion, ' (', s.anio, ')') ORDER BY s.anio DESC, s.seccion SEPARATOR ', ')
              FROM docente_seccion ds JOIN secciones s ON s.id = ds.seccion_id WHERE ds.docente_id = u.id)
-        END AS seccion
+        END AS seccion,
+        -- ids de las secciones del usuario (un estudiante tiene una; un docente puede tener varias): sirven para filtrar sin confundir años
+        CASE
+          WHEN u.rol = 'alumno' THEN (SELECT CAST(a.seccion_id AS CHAR) FROM alumno_seccion a WHERE a.alumno_id = u.id LIMIT 1)
+          WHEN u.rol = 'docente' THEN (SELECT GROUP_CONCAT(ds.seccion_id SEPARATOR ',') FROM docente_seccion ds WHERE ds.docente_id = u.id)
+        END AS seccion_ids
       FROM usuarios u ORDER BY u.id`);
     res.json(rows);
   } catch (e) { fallo(res, e); }
@@ -900,7 +905,7 @@ app.get('/api/docente/alumnos', STAFF, async (req, res) => {
     const sid = idOk(req.query.seccion_id);
     const cfg = await leerConfig();
     const [rows] = await pool.query(`
-      SELECT x.id, x.nie, x.nombre, x.limite_semanal, s.id AS seccion_id, s.especialidad, s.seccion,
+      SELECT x.id, x.nie, x.nombre, x.limite_semanal, s.id AS seccion_id, s.especialidad, s.seccion, s.anio,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'validado') AS validadas,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'pendiente') AS pendientes,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'validado' AND YEARWEEK(r.fecha,1) = YEARWEEK(?,1)) AS semana
@@ -910,7 +915,7 @@ app.get('/api/docente/alumnos', STAFF, async (req, res) => {
       WHERE x.rol = 'alumno' AND x.activo = TRUE${amb.sql}${sid ? ' AND s.id = ?' : ''}
       ORDER BY x.nombre`, [fecha, ...amb.p, ...(sid ? [sid] : [])]);
     res.json(rows.map(r => ({
-      id: r.id, nie: r.nie, nombre: r.nombre, seccion_id: r.seccion_id, grupo: r.especialidad + ' ' + r.seccion,
+      id: r.id, nie: r.nie, nombre: r.nombre, seccion_id: r.seccion_id, grupo: r.especialidad + ' ' + r.seccion, anio: r.anio,   // grupo queda sin año: los PDF toman de ahí el número de sección
       validadas: Number(r.validadas), pendientes: Number(r.pendientes), semana: Number(r.semana),
       limite: r.limite_semanal !== null ? Number(r.limite_semanal) : cfg.max_horas_semana,   // límite semanal efectivo (0 = sin límite)
       limite_propio: r.limite_semanal !== null,
@@ -936,7 +941,7 @@ app.get('/api/docente/alumnos/:id', STAFF, async (req, res) => {
     const cfg = await leerConfig();
     const regs = registros.map(r => ({ ...r, horas: Number(r.horas) }));
     res.json({
-      alumno: { id: a.id, nie: a.nie, nombre: a.nombre, activo: !!a.activo, grupo: a.seccion_id ? a.especialidad + ' ' + a.seccion : '-' },
+      alumno: { id: a.id, nie: a.nie, nombre: a.nombre, activo: !!a.activo, grupo: a.seccion_id ? a.especialidad + ' ' + a.seccion : '-', anio: a.anio || null },
       meta: cfg.meta_horas, max_semana: a.limite_semanal !== null ? Number(a.limite_semanal) : cfg.max_horas_semana,
       limite_propio: a.limite_semanal !== null ? Number(a.limite_semanal) : null, limite_general: cfg.max_horas_semana,
       validadas: regs.filter(r => r.estado === 'validado').reduce((s, r) => s + r.horas, 0),
@@ -1109,7 +1114,7 @@ app.get('/api/docente/bitacora', STAFF, async (req, res) => {
   try {
     const amb = ambito(req.session.usuario);
     const [rows] = await pool.query(`
-      SELECT DATE_FORMAT(r.fecha, '%Y-%m-%d') AS fecha, x.nie AS carnet, x.nombre, CONCAT(s.especialidad, ' ', s.seccion) AS grupo, r.horas
+      SELECT DATE_FORMAT(r.fecha, '%Y-%m-%d') AS fecha, x.nie AS carnet, x.nombre, CONCAT(s.especialidad, ' ', s.seccion, ' (', s.anio, ')') AS grupo, r.horas
       FROM registro_horas r
       JOIN usuarios x ON x.id = r.alumno_id
       JOIN secciones s ON s.id = r.seccion_id
@@ -1293,7 +1298,7 @@ app.get('/api/staff/avisos', DOCENTE, async (req, res) => {
     const [rows] = await pool.query(`
       SELECT a.id, a.titulo, a.contenido, DATE_FORMAT(a.creado_en, '%Y-%m-%d') AS publicado,
              DATE_FORMAT(a.fecha_actividad, '%Y-%m-%d') AS fecha_actividad, a.publicado_por,
-             a.seccion_id, CASE WHEN s.id IS NULL THEN 'Todos los estudiantes' ELSE CONCAT(s.especialidad, ' ', s.seccion) END AS destino
+             a.seccion_id, CASE WHEN s.id IS NULL THEN 'Todos los estudiantes' ELSE CONCAT(s.especialidad, ' ', s.seccion, ' (', s.anio, ')') END AS destino
       FROM avisos a LEFT JOIN secciones s ON s.id = a.seccion_id${amb.sql}
       ORDER BY a.creado_en DESC, a.id DESC LIMIT 100`, amb.p);
     res.json(rows.map(r => ({ ...r, mio: r.publicado_por === u.id })));
@@ -1334,7 +1339,7 @@ app.get('/api/staff/eventos', DOCENTE, async (req, res) => {
     const [rows] = await pool.query(`
       SELECT e.id, e.titulo, e.descripcion, e.lugar, DATE_FORMAT(e.fecha, '%Y-%m-%d') AS fecha,
              TIME_FORMAT(e.hora_inicio, '%H:%i') AS hora_inicio, TIME_FORMAT(e.hora_fin, '%H:%i') AS hora_fin, e.creado_por,
-             e.seccion_id, CASE WHEN s.id IS NULL THEN 'Todos los estudiantes' ELSE CONCAT(s.especialidad, ' ', s.seccion) END AS destino
+             e.seccion_id, CASE WHEN s.id IS NULL THEN 'Todos los estudiantes' ELSE CONCAT(s.especialidad, ' ', s.seccion, ' (', s.anio, ')') END AS destino
       FROM eventos e LEFT JOIN secciones s ON s.id = e.seccion_id${amb.sql}
       ORDER BY e.fecha DESC, e.hora_inicio LIMIT 100`, amb.p);
     res.json(rows.map(r => ({ ...r, mio: r.creado_por === u.id })));
@@ -1397,22 +1402,22 @@ app.get('/api/admin/reportes', STAFF, async (req, res) => {
       `SELECT COALESCE(SUM(r.horas), 0) AS h FROM registro_horas r JOIN secciones s ON s.id = r.seccion_id
        WHERE r.estado = 'validado' AND r.fecha BETWEEN ? AND ?${AND}`, bp);
     const [porSeccion] = await pool.query(`
-      SELECT s.id, s.especialidad, s.seccion, COUNT(a.alumno_id) AS total,
+      SELECT s.id, s.especialidad, s.seccion, s.anio, COUNT(a.alumno_id) AS total,
              COALESCE(SUM(a.estado IN ('presente','tarde')), 0) AS pres
       FROM secciones s
       LEFT JOIN asistencias a ON a.seccion_id = s.id AND a.estado IS NOT NULL AND a.fecha BETWEEN ? AND ?
-      ${WHERE} GROUP BY s.id, s.especialidad, s.seccion ORDER BY s.especialidad, s.seccion`, [desde, hasta, ...p]);
+      ${WHERE} GROUP BY s.id, s.especialidad, s.seccion, s.anio ORDER BY s.anio DESC, s.especialidad, s.seccion`, [desde, hasta, ...p]);
     const [[sec]] = await pool.query(
       `SELECT COUNT(*) AS n FROM secciones s WHERE s.activa = TRUE${AND}`, p);
     const [actividad] = await pool.query(`
-      SELECT DATE_FORMAT(a.fecha, '%Y-%m-%d') AS fecha, s.id, s.especialidad, s.seccion,
+      SELECT DATE_FORMAT(a.fecha, '%Y-%m-%d') AS fecha, s.id, s.especialidad, s.seccion, s.anio,
              COUNT(*) AS registros, COALESCE(SUM(a.estado IN ('presente','tarde')), 0) AS pres
       ${base} AND a.estado IS NOT NULL
-      GROUP BY a.fecha, s.id, s.especialidad, s.seccion ORDER BY a.fecha DESC, s.id LIMIT 8`, bp);
+      GROUP BY a.fecha, s.id, s.especialidad, s.seccion, s.anio ORDER BY a.fecha DESC, s.id LIMIT 8`, bp);
 
     // Avance de horas (acumulado, sin importar el rango de fechas): una fila por estudiante activo
     const [alumnos] = await pool.query(`
-      SELECT x.id, s.id AS sid, s.especialidad, s.seccion,
+      SELECT x.id, s.id AS sid, s.especialidad, s.seccion, s.anio,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'validado') AS v,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'pendiente') AS pe
       FROM usuarios x JOIN alumno_seccion al ON al.alumno_id = x.id JOIN secciones s ON s.id = al.seccion_id
@@ -1422,7 +1427,7 @@ app.get('/api/admin/reportes', STAFF, async (req, res) => {
     for (const x of alumnos) {
       const v = Number(x.v), pe = Number(x.pe);
       validadas += v; pendientes += pe; if (v >= meta) completaron++;
-      const g = avance.get(x.sid) || { grupo: x.especialidad + ' ' + x.seccion, alumnos: 0, horas: 0, completaron: 0 };
+      const g = avance.get(x.sid) || { grupo: x.especialidad + ' ' + x.seccion + ' (' + x.anio + ')', alumnos: 0, horas: 0, completaron: 0 };
       g.alumnos++; g.horas += v; if (v >= meta) g.completaron++;
       avance.set(x.sid, g);
     }
@@ -1445,11 +1450,11 @@ app.get('/api/admin/reportes', STAFF, async (req, res) => {
         ...g, pct: Math.round(Math.min(g.horas, g.alumnos * meta) / (g.alumnos * meta) * 100),
       })),
       porSeccion: porSeccion.map(r => ({
-        id: r.id, grupo: r.especialidad + ' ' + r.seccion, total: Number(r.total), pres: Number(r.pres),
+        id: r.id, grupo: r.especialidad + ' ' + r.seccion + ' (' + r.anio + ')', total: Number(r.total), pres: Number(r.pres),
         pct: Number(r.total) ? Math.round(Number(r.pres) / Number(r.total) * 100) : 0,
       })),
       actividad: actividad.map(r => ({
-        fecha: r.fecha, grupo: r.especialidad + ' ' + r.seccion, registros: Number(r.registros), pres: Number(r.pres),
+        fecha: r.fecha, grupo: r.especialidad + ' ' + r.seccion + ' (' + r.anio + ')', registros: Number(r.registros), pres: Number(r.pres),
         pct: Number(r.registros) ? Math.round(Number(r.pres) / Number(r.registros) * 100) : 0,
       })),
     });
