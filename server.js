@@ -527,10 +527,12 @@ app.post('/api/admin/asignaciones/csv', ADMIN, async (req, res) => {
     for (const x of secs) { const k = norm(x.especialidad + ' ' + x.seccion); if (!porNombre.has(k)) porNombre.set(k, []); porNombre.get(k).push(x); }
     const nombreSec = new Map(secs.map(x => [x.id, x.especialidad + ' ' + x.seccion + ' (' + x.anio + ')']));
     // Texto de la fila: "Desarrollo de Software 1" o "Desarrollo de Software 1 2026". Sin año se usa la sección activa.
-    const buscarSec = txt => {
+    // anioFila: valor de la columna "anio" (o el año elegido en pantalla). Tiene prioridad sobre un año escrito dentro del texto.
+    const buscarSec = (txt, anioFila) => {
       let t = String(txt || '').trim(), anio = null;
       const m = t.match(/^(.*?)[\s(\-\/]*((?:19|20)\d{2})\)?$/);
       if (m && porNombre.has(norm(m[1]))) { t = m[1]; anio = Number(m[2]); }
+      if (anioFila) anio = anioFila;
       const lista = porNombre.get(norm(t)) || [];
       if (!lista.length) return { error: 'La sección no existe (escríbela como en Gestión de Secciones)' };
       if (anio) { const x = lista.find(y => y.anio === anio); return x ? { sec: x } : { error: 'No existe esa sección en el año ' + anio }; }
@@ -548,14 +550,15 @@ app.post('/api/admin/asignaciones/csv', ADMIN, async (req, res) => {
     const vistos = new Set(), trabajo = [];
     const resultado = filas.map((f, i) => {
       const nie = String(f.nie || '').trim(), nombre = limpiarNombre(f.nombre), txt = limpiarTexto(f.seccion, 150);
-      const r = { fila: i + 1, nie, nombre, seccion: txt, actual: '', estado: 'error', mensaje: '', pin: '' };
-      const a = porNie.get(nie), busq = buscarSec(txt), sec = busq.sec;
+      const anioTxt = String(f.anio ?? '').trim(), anioFila = /^\d{4}$/.test(anioTxt) ? Number(anioTxt) : null;
+      const r = { fila: i + 1, nie, nombre, seccion: txt, anio: anioFila || '', actual: '', estado: 'error', mensaje: '', pin: '' };
+      const a = porNie.get(nie), busq = anioTxt && !anioFila ? { error: 'Año no válido (escribe 4 dígitos, por ejemplo 2025)' } : buscarSec(txt, anioFila), sec = busq.sec;
       if (!nie || !txt) r.mensaje = 'Falta el NIE o la sección';
       else if (vistos.has(nie)) r.mensaje = 'NIE repetido en el archivo (se usa su primera fila)';
       else if (!sec) r.mensaje = busq.error;
-      else if (!sec.activa) r.mensaje = 'La sección está inactiva';
+      else if (!sec.activa) { r.anio = sec.anio; r.mensaje = 'La sección está inactiva (año ' + sec.anio + ')'; }
       else {
-        r.seccion = sec.especialidad + ' ' + sec.seccion + ' (' + sec.anio + ')';
+        r.seccion = sec.especialidad + ' ' + sec.seccion + ' (' + sec.anio + ')'; r.anio = sec.anio;
         if (a) {
           r.nombre = a.nombre; r.actual = a.seccion_id ? (nombreSec.get(a.seccion_id) || '-') : 'Sin sección';
           if (a.seccion_id === sec.id) { r.estado = 'igual'; r.mensaje = 'Ya está en esa sección'; }
@@ -608,7 +611,7 @@ app.put('/api/admin/config', ADMIN, async (req, res) => {
     const meta = Number(req.body.meta_horas), max = Number(req.body.max_horas_semana);
     const inst = limpiarTexto(req.body.institucion, 120);
     if (!Number.isInteger(meta) || meta < 1 || meta > 2000) throw new ErrUsuario('La meta de horas debe ser un número entero entre 1 y 2000');
-    if (!Number.isFinite(max) || max < 0 || max > 150 || !decimas(max)) throw new ErrUsuario('El máximo semanal debe estar entre 0 y 150 (con un decimal, por ejemplo 2.3). Usa 0 para no tener límite');
+    if (!Number.isFinite(max) || max < 0 || max > 40 || !decimas(max)) throw new ErrUsuario('El máximo semanal debe estar entre 0 y 40 (con un decimal, por ejemplo 2.3). Usa 0 para no tener límite');
     if (inst.length < 3) throw new ErrUsuario('Escribe el nombre de la institución');
     await guardarConfig(pool, 'meta_horas', meta);
     await guardarConfig(pool, 'max_horas_semana', max);
@@ -856,10 +859,10 @@ async function datosRegistro(b, db = pool) {
 }
 
 const decimas = n => Math.abs(n * 10 - Math.round(n * 10)) < 1e-6;   // se aceptan décimas: 2.3, 1.5, 0.1...
-const horasOk = h => Number.isFinite(h) && h > 0 && h <= 150 && decimas(h);
+const horasOk = h => Number.isFinite(h) && h > 0 && h <= 40 && decimas(h);
 
 async function insertarHoras(conn, a, d, horas, userId, cfg) {
-  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben estar entre 0.1 y 150 (con un decimal, por ejemplo 2.3)');
+  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben estar entre 0.1 y 40 (con un decimal, por ejemplo 2.3)');
   const cupo = await cupoAlumno(conn, a.id, d.fecha, cfg);
   if (horas > cupo) throw new ErrUsuario(`${a.nombre} solo puede registrar ${cupo} h en esa semana (límite semanal del estudiante o meta de ${cfg.meta_horas} h)`);
   await conn.query(
@@ -1037,7 +1040,7 @@ app.delete('/api/docente/horas/:id', STAFF, async (req, res) => {
 });
 
 // Excepción por estudiante: el docente sube (o quita) el límite semanal de horas de un estudiante de sus secciones.
-// limite = número con un decimal (0.1 a 150), o null para volver al límite general de la institución.
+// limite = número con un decimal (0.1 a 40), o null para volver al límite general de la institución.
 app.put('/api/docente/alumnos/:id/limite', STAFF, async (req, res) => {
   try {
     const id = idOk(req.params.id);
@@ -1047,8 +1050,8 @@ app.put('/api/docente/alumnos/:id/limite', STAFF, async (req, res) => {
     if (limite === null || limite === undefined || limite === '') limite = null;
     else {
       limite = Number(limite);
-      if (!Number.isFinite(limite) || limite < 0.1 || limite > 150 || !decimas(limite)) {
-        throw new ErrUsuario('El límite semanal debe estar entre 0.1 y 150 horas (con un decimal)');
+      if (!Number.isFinite(limite) || limite < 0.1 || limite > 40 || !decimas(limite)) {
+        throw new ErrUsuario('El límite semanal debe estar entre 0.1 y 40 horas (con un decimal)');
       }
     }
     await pool.query('UPDATE usuarios SET limite_semanal = ? WHERE id = ?', [limite, id]);
