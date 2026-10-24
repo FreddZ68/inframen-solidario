@@ -17,6 +17,19 @@ const opcionesActividad = ACT => {
 const leerActividad = (sel, txt) => sel.value === 'otra' ? { actividad: txt.value, actividad_id: null } : { actividad_id: sel.value || null, actividad: '' };
 
 /* ================== Inicio del docente ================== */
+// Selector de año + selector de sección (cada opción lleva su año). Los dos selects deben existir: #ga (año) y #gs (sección).
+function llenarAnioSec(secs) {
+  const a0 = $('#ga').value, s0 = $('#gs').value;
+  const anios = [...new Set(secs.map(s => String(s.anio)))].sort((x, y) => y - x);
+  $('#ga').innerHTML = '<option value="">Todos los años</option>' + anios.map(y => `<option value="${y}">Año ${y}</option>`).join('');
+  $('#ga').value = anios.includes(a0) ? a0 : '';
+  const lista = secs.filter(s => !$('#ga').value || String(s.anio) === $('#ga').value)
+    .sort((x, y) => y.anio - x.anio || (x.especialidad + ' ' + x.seccion).localeCompare(y.especialidad + ' ' + y.seccion, 'es', { numeric: true }));
+  $('#gs').innerHTML = '<option value="">Todas las secciones</option>' + lista.map(s => `<option value="${s.id}">${esc(s.especialidad + ' ' + s.seccion)} (${s.anio})</option>`).join('');
+  $('#gs').value = lista.some(s => String(s.id) === s0) ? s0 : '';
+}
+const grupoAnio = a => a.grupo + (a.anio ? ` (${a.anio})` : '');
+
 PAGINAS.inicioDocente = async yo => {
   $('#contenido').innerHTML = `<div class="titulo"><div><h1>Panel Docente</h1><p>Bienvenido(a), ${esc(yo.nombre.split(' ')[0])}</p></div></div>
     <div class="kpis" id="kpis"></div>
@@ -41,7 +54,7 @@ PAGINAS['mis-secciones'] = async yo => {
   $('#contenido').innerHTML = `<div class="titulo"><div><h1>Mis Secciones</h1><p>Consulta tus grupos asignados</p></div></div><div class="secciones" id="grid"></div>`;
   const [secs, al] = await Promise.all([api('/api/admin/secciones'), api('/api/docente/alumnos')]);
   $('#grid').innerHTML = secs.map(s => {
-    const g = s.especialidad + ' ' + s.seccion, x = al.filter(a => a.seccion_id === s.id);
+    const g = s.especialidad + ' ' + s.seccion + ' (' + s.anio + ')', x = al.filter(a => a.seccion_id === s.id);
     const h = x.reduce((t, a) => t + a.validadas, 0), ok = x.filter(a => a.validadas >= CFG.meta_horas).length;
     return `<article class="card seccion"><header><div class="badge">${esc(String(s.seccion))}</div><h3>${esc(g)}</h3></header>
       <div class="dato">${ico('users')}<span>Estudiantes:</span><b>${x.length}</b></div>
@@ -55,19 +68,20 @@ PAGINAS['mis-secciones'] = async yo => {
 /* ================== Estudiantes: listado por sección ================== */
 PAGINAS.estudiantes = async yo => {
   $('#contenido').innerHTML = `<div class="titulo"><div><h1>Estudiantes</h1><p>Elige un estudiante para ver su historial y registrar horas.</p></div></div>
-    <div class="card filtros"><div class="buscar grow">${ico('search')}<input id="q" placeholder="Buscar por nombre o NIE..."></div><select id="gs"></select></div>
+    <div class="card filtros"><div class="buscar grow">${ico('search')}<input id="q" placeholder="Buscar por nombre o NIE..."></div><select id="ga"></select><select id="gs"></select></div>
     <div class="card bloque"><div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Estudiante</th><th>Sección</th><th>Horas validadas</th><th>Pendientes</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="tb"></tbody></table></div>
     <div class="pie-tabla"><span id="info"></span><div class="pag" id="pag"></div></div></div>`;
   let D = [], pag = 1; const POR = 12;
   const pins = new Map();   // PIN visibles en pantalla (id del estudiante -> PIN)
   const secs = await api('/api/admin/secciones');
-  $('#gs').innerHTML = '<option value="">Todas las secciones</option>' + secs.map(s => `<option value="${s.id}">${esc(s.especialidad + ' ' + s.seccion)}</option>`).join('');
-  const sp = new URLSearchParams(location.search).get('seccion'); if (sp && secs.some(s => String(s.id) === sp)) $('#gs').value = sp;
-  const vis = () => { const q = $('#q').value.trim().toLowerCase(), g = $('#gs').value;
-    return D.filter(a => (!g || String(a.seccion_id) === g) && (a.nombre + ' ' + a.nie).toLowerCase().includes(q)).sort(porApellido); };
+  llenarAnioSec(secs);
+  const sp = new URLSearchParams(location.search).get('seccion');
+  if (sp && secs.some(s => String(s.id) === sp)) { $('#ga').value = String(secs.find(s => String(s.id) === sp).anio); llenarAnioSec(secs); $('#gs').value = sp; }
+  const vis = () => { const q = $('#q').value.trim().toLowerCase(), g = $('#gs').value, an = $('#ga').value;
+    return D.filter(a => (!g || String(a.seccion_id) === g) && (!an || String(a.anio) === an) && (a.nombre + ' ' + a.nie).toLowerCase().includes(q)).sort(porApellido); };
   const pintar = () => {
     const v = vis(), ult = Math.max(1, Math.ceil(v.length / POR)); if (pag > ult) pag = ult;
-    $('#tb').innerHTML = v.slice((pag - 1) * POR, pag * POR).map(a => `<tr class="clic" data-id="${a.id}"><td><b>${esc(apellidosPrimero(a.nombre))}</b><small>${esc(a.nie)}${a.limite_propio ? `<span class="tag">límite ${horasTxt(a.limite)}/semana</span>` : ''}</small></td><td>${esc(a.grupo)}</td>
+    $('#tb').innerHTML = v.slice((pag - 1) * POR, pag * POR).map(a => `<tr class="clic" data-id="${a.id}"><td><b>${esc(apellidosPrimero(a.nombre))}</b><small>${esc(a.nie)}${a.limite_propio ? `<span class="tag">límite ${horasTxt(a.limite)}/semana</span>` : ''}</small></td><td>${esc(grupoAnio(a))}</td>
       <td>${barra(a.validadas)}</td><td>${a.pendientes ? `<span class="pill p-pend">${horasTxt(a.pendientes)}</span>` : '-'}</td><td>${pillEstadoHoras(a.validadas)}</td>
       <td><div class="fila-btns nowrap"><a class="btn claro" href="estudiante.html?id=${a.id}">Ver perfil ›</a>
         ${pins.has(a.id) ? `<b class="pinv">${esc(pins.get(a.id))}</b><button class="btn claro" data-ocultar="${a.id}">Ocultar</button>` : `<button class="btn claro" data-verpin="${a.id}">Ver PIN</button>`}
@@ -77,6 +91,7 @@ PAGINAS.estudiantes = async yo => {
     $('#info').textContent = $('#info').textContent.replace(/(\d+)$/, '$1 estudiantes');
   };
   $('#q').oninput = $('#gs').onchange = () => { pag = 1; pintar(); };
+  $('#ga').onchange = () => { llenarAnioSec(secs); pag = 1; pintar(); };
   $('#tb').onclick = async e => {
     const b = e.target.closest('button');
     if (b) {
@@ -108,7 +123,7 @@ PAGINAS.estudiante = async yo => {
     const a = P.alumno, falta = Math.max(0, P.meta - P.validadas), pct = P.validadas / P.meta * 100, as = P.asistencia;
     const ult = Math.max(1, Math.ceil(P.registros.length / POR)); if (pag > ult) pag = ult;
     $('#perfilAlu').innerHTML = `<div class="alu-grid">
-      <div class="card bloque hero">${anillo(pct, true)}<div><h2>${esc(a.nombre)}</h2><small style="color:var(--gris)">NIE ${esc(a.nie)} · ${esc(a.grupo)}</small></div>
+      <div class="card bloque hero">${anillo(pct, true)}<div><h2>${esc(a.nombre)}</h2><small style="color:var(--gris)">NIE ${esc(a.nie)} · ${esc(a.grupo)}${a.anio ? ` (${a.anio})` : ''}</small></div>
         ${pillEstadoHoras(P.validadas)}
         <div class="mini-stats"><div class="mini"><small>Validadas</small><b>${horasTxt(P.validadas)}</b></div><div class="mini"><small>Pendientes</small><b>${horasTxt(P.pendientes)}</b></div>
         <div class="mini"><small>Faltan</small><b>${horasTxt(falta)}</b></div><div class="mini"><small>Meta</small><b>${P.meta} h</b></div></div>
@@ -215,14 +230,14 @@ PAGINAS.horas = async yo => {
       <div class="form-fila"><div id="wotra" class="doble" style="display:none"><label>Nombre de la actividad</label><input id="otra" maxlength="100" placeholder="Ej.: Apoyo en biblioteca"></div>
         <div class="doble"><label>Descripción breve (opcional)</label><input id="desc" maxlength="255"></div>
         <div><label>Estado</label><input value="Pendiente" disabled><small>Las horas se guardan como Pendientes mientras se realizan. Al finalizar usa «Validar horas».</small></div></div></div>
-    <div class="card filtros"><div class="buscar grow">${ico('search')}<input id="q" placeholder="Buscar por nombre o NIE..."></div><select id="gs"></select>
+    <div class="card filtros"><div class="buscar grow">${ico('search')}<input id="q" placeholder="Buscar por nombre o NIE..."></div><select id="ga"></select><select id="gs"></select>
       <button class="btn claro" id="marcar" type="button">Marcar visibles</button><button class="btn claro" id="quitar" type="button">Quitar marcas</button><button class="btn" id="validar" type="button">${ico('ok')} Validar horas</button></div>
     <div id="lista"></div>
     <div class="card pie-guardar"><b id="tot"></b><button class="btn" id="guardar" type="button">${ico('save')} Guardar horas</button></div>`;
   const sel = new Map(); let D = [];
   const [ACT, secs] = await Promise.all([api('/api/actividades'), api('/api/admin/secciones')]);
   $('#act').innerHTML = opcionesActividad(ACT);
-  $('#gs').innerHTML = '<option value="">Todas las secciones</option>' + secs.map(s => `<option value="${s.id}">${esc(s.especialidad + ' ' + s.seccion)}</option>`).join('');
+  llenarAnioSec(secs);
   $('#fecha').value = hoy(); $('#hdef').value = CFG.max_horas_semana > 0 ? CFG.max_horas_semana : 1;
   $('#regla').textContent = (CFG.max_horas_semana > 0 ? `Máximo ${CFG.max_horas_semana} h por estudiante a la semana (se puede ampliar a un estudiante desde su perfil), ` : 'Sin límite semanal, ') + `hasta completar ${CFG.meta_horas} h.`;
   const cupo = a => Math.max(0, Math.round(Math.min(CFG.meta_horas - a.validadas - a.pendientes, a.limite > 0 ? a.limite - a.semana : Infinity) * 10) / 10);
@@ -234,15 +249,15 @@ PAGINAS.horas = async yo => {
     if (+$('#hdef').value > topeDef) toast(`El máximo por semana definido por el administrador es ${horasTxt(topeDef)}`);
     $('#hdef').value = hdef(); pintar();
   };
-  const vis = () => { const q = $('#q').value.trim().toLowerCase(), g = $('#gs').value;
-    return D.filter(a => (!g || String(a.seccion_id) === g) && (a.nombre + ' ' + a.nie).toLowerCase().includes(q)).sort(porApellido); };
+  const vis = () => { const q = $('#q').value.trim().toLowerCase(), g = $('#gs').value, an = $('#ga').value;
+    return D.filter(a => (!g || String(a.seccion_id) === g) && (!an || String(a.anio) === an) && (a.nombre + ' ' + a.nie).toLowerCase().includes(q)).sort(porApellido); };
   const pintar = () => {
     $('#lista').innerHTML = vis().map(a => {
       const cp = cupo(a); if (cp === 0) sel.delete(a.id);
       const on = sel.has(a.id), v = Math.min(sel.get(a.id) ?? hdef(), cp), dis = cp === 0 ? ' disabled' : '';
       const aviso = a.validadas + a.pendientes >= CFG.meta_horas ? 'meta completada' : cp === 0 ? `límite de ${a.limite} h por semana` : '';
       return `<div class="item${on ? ' on' : ''}" data-id="${a.id}"><input type="checkbox" class="chk"${on ? ' checked' : ''}${dis}>
-        <div class="info"><b>${esc(apellidosPrimero(a.nombre))}</b><small>${esc(a.nie)} · ${esc(a.grupo)}${a.semana ? `<span class="tag">ya tiene ${horasTxt(a.semana)} esa semana</span>` : ''}${aviso ? `<span class="tag">${aviso}</span>` : ''}</small></div>
+        <div class="info"><b>${esc(apellidosPrimero(a.nombre))}</b><small>${esc(a.nie)} · ${esc(grupoAnio(a))}${a.semana ? `<span class="tag">ya tiene ${horasTxt(a.semana)} esa semana</span>` : ''}${aviso ? `<span class="tag">${aviso}</span>` : ''}</small></div>
         ${barra(a.validadas)}<input type="number" class="hrs" min="0.1" max="${cp}" step="0.1" value="${v}"${dis}></div>`;
     }).join('') || '<p class="vacio">No hay estudiantes para mostrar.</p>';
     const n = sel.size, t = [...sel.values()].reduce((s, v) => s + v, 0);
@@ -273,6 +288,7 @@ PAGINAS.horas = async yo => {
     } catch (e) { toast(e.message); }
   };
   $('#q').oninput = $('#gs').onchange = pintar;
+  $('#ga').onchange = () => { llenarAnioSec(secs); pintar(); };
   $('#act').onchange = () => { $('#wotra').style.display = $('#act').value === 'otra' ? '' : 'none'; };
   $('#fecha').onchange = async () => { if (!$('#fecha').value || $('#fecha').value > hoy()) { $('#fecha').value = hoy(); toast('No se puede elegir una fecha futura'); } await cargar(); pintar(); };
   $('#guardar').onclick = async () => {
@@ -290,27 +306,27 @@ PAGINAS.horas = async yo => {
 PAGINAS.resumen = async yo => {
   $('#contenido').innerHTML = `<div class="titulo"><div><h1>Resumen de horas</h1></div><div class="accion fila-btns"><button class="btn claro" id="pdfr">${ico('download')} Descargar resumen (PDF)</button><button class="btn claro" id="pdfb">${ico('download')} Descargar bitácora (PDF)</button></div></div>
     <p class="sub" id="sub"></p>
-    <div class="card filtros"><div class="buscar grow">${ico('search')}<input id="q" placeholder="Nombre o NIE"></div><select id="gs"></select>
+    <div class="card filtros"><div class="buscar grow">${ico('search')}<input id="q" placeholder="Nombre o NIE"></div><select id="ga"></select><select id="gs"></select>
       <select id="e"><option value="">Todos los estados</option><option>Completado</option><option>En curso</option><option>Sin horas</option></select>
       <select id="o"><option>Nombre</option><option>Menos horas primero</option><option>Más horas primero</option></select>
       <input type="number" id="mn" min="0" placeholder="Horas desde" style="width:130px"><input type="number" id="mx" min="0" placeholder="Horas hasta" style="width:130px"></div>
     <div class="card bloque"><div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Estudiante</th><th>Sección</th><th>Avance (validadas)</th><th>Pendientes</th><th>Faltan</th><th>Estado</th></tr></thead><tbody id="tb"></tbody></table></div></div>`;
   const [D, secs] = await Promise.all([api('/api/docente/alumnos'), api('/api/admin/secciones')]);
-  $('#gs').innerHTML = '<option value="">Todas las secciones</option>' + secs.map(s => `<option value="${esc(s.especialidad + ' ' + s.seccion)}">${esc(s.especialidad + ' ' + s.seccion)}</option>`).join('');
-  const gp = new URLSearchParams(location.search).get('grupo'); if (gp) $('#gs').value = gp;
+  llenarAnioSec(secs);
   const datos = () => {
-    const q = $('#q').value.trim().toLowerCase(), g = $('#gs').value, e = $('#e').value, o = $('#o').value, mn = $('#mn').value, mx = $('#mx').value;
+    const q = $('#q').value.trim().toLowerCase(), g = $('#gs').value, an = $('#ga').value, e = $('#e').value, o = $('#o').value, mn = $('#mn').value, mx = $('#mx').value;
     const r = D.map(a => ({ ...a, carnet: a.nie, h: a.validadas }))
-      .filter(a => (!g || a.grupo === g) && (a.nombre + ' ' + a.nie).toLowerCase().includes(q) && (!e || estadoHoras(a.h) === e) && (mn === '' || a.h >= +mn) && (mx === '' || a.h <= +mx));
+      .filter(a => (!g || String(a.seccion_id) === g) && (!an || String(a.anio) === an) && (a.nombre + ' ' + a.nie).toLowerCase().includes(q) && (!e || estadoHoras(a.h) === e) && (mn === '' || a.h >= +mn) && (mx === '' || a.h <= +mx));
     return r.sort(o === 'Menos horas primero' ? (a, b) => a.h - b.h : o === 'Más horas primero' ? (a, b) => b.h - a.h : porApellido);
   };
   const pintar = () => {
     $('#sub').textContent = `${D.length} estudiantes · ${D.filter(a => a.validadas >= CFG.meta_horas).length} completaron · ${horasTxt(D.reduce((s, a) => s + a.validadas, 0))} validadas · meta de ${CFG.meta_horas} h`;
-    $('#tb').innerHTML = datos().map(a => `<tr class="clic" data-id="${a.id}"><td><b>${esc(apellidosPrimero(a.nombre))}</b><small>${esc(a.nie)}</small></td><td>${esc(a.grupo)}</td><td>${barra(a.h)}</td>
+    $('#tb').innerHTML = datos().map(a => `<tr class="clic" data-id="${a.id}"><td><b>${esc(apellidosPrimero(a.nombre))}</b><small>${esc(a.nie)}</small></td><td>${esc(grupoAnio(a))}</td><td>${barra(a.h)}</td>
       <td>${a.pendientes ? `<span class="pill p-pend">${horasTxt(a.pendientes)}</span>` : '-'}</td><td><b>${horasTxt(Math.max(0, CFG.meta_horas - a.h))}</b></td><td>${pillEstadoHoras(a.h)}</td></tr>`).join('')
       || '<tr><td colspan="6" class="vacio">Sin resultados.</td></tr>';
   };
   $$('.filtros [id]').forEach(el => { el.oninput = pintar; });
+  $('#ga').onchange = () => { llenarAnioSec(secs); pintar(); };
   $('#tb').onclick = e => { const tr = e.target.closest('tr[data-id]'); if (tr) location.href = 'estudiante.html?id=' + tr.dataset.id; };
   $('#pdfr').onclick = () => pdfResumen(datos());
   $('#pdfb').onclick = async () => { try { pdfBitacora(await api('/api/docente/bitacora')); } catch (e) { toast(e.message); } };
@@ -464,7 +480,7 @@ PAGINAS.publicaciones = async yo => {
     <div class="dos-col"><div class="card bloque"><h2 id="tl"></h2><div id="lista"></div></div><div class="card bloque detalle" id="form"></div></div>`;
   const secs = (await api('/api/admin/secciones')).filter(s => s.activa);
   const destino = `<div><label>Dirigido a</label><select id="pd" required>${admin ? '<option value="">Todos los estudiantes</option>' : '<option value="" disabled selected>Elige una sección…</option>'}
-    ${secs.map(s => `<option value="${s.id}">${esc(s.especialidad + ' ' + s.seccion)}</option>`).join('')}</select></div>`;
+    ${secs.map(s => `<option value="${s.id}">${esc(s.especialidad + ' ' + s.seccion + ' (' + s.anio + ')')}</option>`).join('')}</select></div>`;
   let tab = 'a';
   const FORM = {
     a: `<h2>Nuevo aviso</h2><form class="form-modal" id="fp"><div><label>Título</label><input id="pt" maxlength="120" required></div>
