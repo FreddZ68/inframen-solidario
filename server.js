@@ -29,6 +29,13 @@ const pool = mysql.createPool({
 
 /* ================== Constantes y validaciones ================== */
 const DOMINIO = '@clases.edu.sv';
+// Máximo de estudiantes activos por sección (se puede cambiar con MAX_ESTUDIANTES_SECCION en .env)
+const MAX_POR_SECCION = Number(process.env.MAX_ESTUDIANTES_SECCION) || 50;
+async function ocupadosSeccion(db, seccionId, excluirAlumnoId = 0) {
+  const [[r]] = await db.query(`SELECT COUNT(*) AS n FROM alumno_seccion a JOIN usuarios x ON x.id = a.alumno_id
+    WHERE a.seccion_id = ? AND x.activo = TRUE AND x.id <> ?`, [seccionId, excluirAlumnoId]);
+  return Number(r.n);
+}
 const ROLES = ['administrador', 'docente', 'alumno'];
 const ESTADOS = ['presente', 'tarde', 'falto', 'permiso'];
 
@@ -292,6 +299,7 @@ app.post('/api/admin/usuarios', ADMIN, async (req, res) => {
       if (!/^\d{4}$/.test(pin)) throw new ErrUsuario('El PIN inicial debe tener exactamente 4 números');
     }
     const hash = await bcrypt.hash(pin, 10);
+    if (seccionId && await ocupadosSeccion(conn, seccionId) >= MAX_POR_SECCION) throw new ErrUsuario(`La sección ya tiene ${MAX_POR_SECCION} estudiantes (cupo lleno)`);
     await conn.beginTransaction();
     const [r] = await conn.query(
       'INSERT INTO usuarios (nombre, correo, password_hash, rol, nie, pin_cifrado) VALUES (?, ?, ?, ?, ?, ?)',
@@ -326,6 +334,7 @@ app.put('/api/admin/usuarios/:id', ADMIN, async (req, res) => {
       if (!seccionId) throw new ErrUsuario('Selecciona la sección del estudiante');
       const [[s]] = await conn.query('SELECT id FROM secciones WHERE id = ?', [seccionId]);
       if (!s) throw new ErrUsuario('La sección no existe');
+      if (activo && await ocupadosSeccion(conn, seccionId, id) >= MAX_POR_SECCION) throw new ErrUsuario(`La sección ya tiene ${MAX_POR_SECCION} estudiantes (cupo lleno)`);
     }
     await conn.beginTransaction();
     await conn.query('UPDATE usuarios SET nombre = ?, correo = ?, activo = ? WHERE id = ?', [nombre, correo, activo, id]);
@@ -414,7 +423,7 @@ app.get('/api/admin/secciones', STAFF, async (req, res) => {
       FROM secciones s
       ${u.rol === 'docente' ? 'WHERE EXISTS (SELECT 1 FROM docente_seccion q WHERE q.seccion_id = s.id AND q.docente_id = ?)' : ''}
       ORDER BY s.anio DESC, s.especialidad, s.seccion`, u.rol === 'docente' ? [u.id] : []);
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, cupo_max: MAX_POR_SECCION })));
   } catch (e) { fallo(res, e); }
 });
 
@@ -500,6 +509,8 @@ app.post('/api/admin/asignaciones', ADMIN, async (req, res) => {
     const [libres] = await conn.query(`SELECT u.id FROM usuarios u WHERE u.rol = 'alumno' AND u.activo = TRUE AND u.id IN (?)
       AND NOT EXISTS (SELECT 1 FROM alumno_seccion a WHERE a.alumno_id = u.id)`, [ids]);
     if (!libres.length) throw new ErrUsuario('Los estudiantes seleccionados ya tienen una sección asignada');
+    const hueco = MAX_POR_SECCION - await ocupadosSeccion(conn, sid);
+    if (libres.length > hueco) throw new ErrUsuario(hueco <= 0 ? `La sección ya tiene ${MAX_POR_SECCION} estudiantes (cupo lleno)` : `La sección solo tiene ${hueco} lugar(es) libre(s) (máximo ${MAX_POR_SECCION}) y elegiste ${libres.length}`);
     await conn.beginTransaction();
     for (const a of libres) await conn.query('INSERT INTO alumno_seccion (alumno_id, seccion_id) VALUES (?, ?)', [a.id, sid]);
     await conn.commit();
@@ -547,6 +558,13 @@ app.post('/api/admin/asignaciones/csv', ADMIN, async (req, res) => {
     const [cor] = await conn.query('SELECT correo FROM usuarios');
     const correos = new Set(cor.map(c => String(c.correo).toLowerCase()));
 
+    // Cupo: estudiantes activos que ya hay en cada sección + los que esta carga va sumando
+    const [cnt] = await conn.query(`SELECT a.seccion_id, COUNT(*) AS n FROM alumno_seccion a JOIN usuarios x ON x.id = a.alumno_id
+      WHERE x.activo = TRUE GROUP BY a.seccion_id`);
+    const ocupados = new Map(cnt.map(c => [c.seccion_id, Number(c.n)]));
+    const lleno = id => (ocupados.get(id) || 0) >= MAX_POR_SECCION;
+    const ocupar = id => ocupados.set(id, (ocupados.get(id) || 0) + 1);
+    const msgLleno = `La sección ya tiene ${MAX_POR_SECCION} estudiantes (cupo lleno)`;
     const vistos = new Set(), trabajo = [];
     const resultado = filas.map((f, i) => {
       const nie = String(f.nie || '').trim(), nombre = limpiarNombre(f.nombre), txt = limpiarTexto(f.seccion, 150);
@@ -564,11 +582,13 @@ app.post('/api/admin/asignaciones/csv', ADMIN, async (req, res) => {
           if (a.seccion_id === sec.id) { r.estado = 'igual'; r.mensaje = 'Ya está en esa sección'; }
           else if (a.seccion_id) r.mensaje = `Ya tiene sección asignada (${r.actual}); no se cambia`;
           else if (!a.activo) r.mensaje = 'El estudiante está inactivo';
-          else { r.estado = 'ok'; r.mensaje = aplicar ? 'Asignado' : 'Existe: se asignará a la sección'; trabajo.push({ r, a, sec }); }
+          else if (lleno(sec.id)) r.mensaje = msgLleno;
+          else { r.estado = 'ok'; r.mensaje = aplicar ? 'Asignado' : 'Existe: se asignará a la sección'; ocupar(sec.id); trabajo.push({ r, a, sec }); }
         } else if (!RE_NIE_CSV.test(nie)) r.mensaje = 'NIE no válido (7 u 8 números)';
         else if (nombre.length < 3 || nombre.length > 100 || !RE_NOMBRE.test(nombre)) r.mensaje = 'Nombre no válido (nombre y apellido, solo letras)';
         else if (correos.has((nie + DOMINIO).toLowerCase())) r.mensaje = 'Ya existe un usuario con ese correo';
-        else { r.estado = 'nuevo'; r.actual = '-'; r.mensaje = aplicar ? 'Creado y asignado' : 'Se creará y asignará'; trabajo.push({ r, sec }); }
+        else if (lleno(sec.id)) r.mensaje = msgLleno;
+        else { r.estado = 'nuevo'; r.actual = '-'; r.mensaje = aplicar ? 'Creado y asignado' : 'Se creará y asignará'; ocupar(sec.id); trabajo.push({ r, sec }); }
       }
       vistos.add(nie);
       return r;
