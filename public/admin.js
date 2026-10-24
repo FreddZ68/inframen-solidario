@@ -179,7 +179,7 @@ PAGINAS.secciones = async yo => {
       + stat('user', 'Docentes asignados', docs) + stat('users', 'Estudiantes inscritos', D.reduce((a, s) => a + Number(s.estudiantes), 0));
     const v = vis(), ult = Math.max(1, Math.ceil(v.length / POR)); if (pag > ult) pag = ult;
     $('#tb').innerHTML = v.slice((pag - 1) * POR, pag * POR).map(s => `<tr class="clic${sel === s.id ? ' sel' : ''}" data-fila="${s.id}">
-      <td>S${pad(s.id, 2)}</td><td>${esc(s.especialidad)}</td><td>${s.seccion}</td><td>${s.anio}</td><td>${esc(s.docente || 'Sin asignar')}</td><td>${s.estudiantes}</td>
+      <td>S${pad(s.id, 2)}</td><td>${esc(s.especialidad)}</td><td>${s.seccion}</td><td>${s.anio}</td><td>${esc(s.docente || 'Sin asignar')}</td><td>${s.estudiantes}${s.cupo_max ? ' / ' + s.cupo_max : ''}</td>
       <td><span class="pill ${s.activa ? 'e-act' : 'e-ina'}">${s.activa ? 'Activa' : 'Inactiva'}</span>${vencida(s) ? ` <span class="pill p-pend" title="El año de esta sección ya pasó">Año vencido</span>` : ''}</td>
       <td><div class="acc"><button data-ver="${s.id}" title="Ver">${ico('eye')}</button><button data-estado="${s.id}" title="${s.activa ? 'Poner inactiva' : 'Poner activa'}">${ico('rotate')}</button><button data-edit="${s.id}" title="Editar">${ico('edit')}</button><button data-del="${s.id}" title="Eliminar">${ico('trash')}</button></div></td></tr>`).join('')
       || '<tr><td colspan="8" class="vacio">No hay secciones con esos filtros.</td></tr>';
@@ -503,7 +503,7 @@ PAGINAS.asignar = async yo => {
   $('#vCsv').innerHTML = `<div class="card bloque" style="margin-bottom:14px"><h2>Cargar archivo</h2>
       <p class="sub" style="margin:0 0 12px">Una fila por estudiante, con las columnas <b>nie</b>, <b>nombre</b> y <b>seccion</b> (el nombre de la sección como aparece en Gestión de Secciones, por ejemplo <i>Desarrollo de Software 1</i>).
       Si el NIE no existe, se <b>crea la cuenta</b> del estudiante con un PIN generado y se asigna a la sección. Si ya existe y no tiene sección, solo se asigna. A quien ya tiene sección no se le cambia.
-      También se acepta <b>especialidad</b> y <b>seccion</b> (número) en columnas separadas. Para secciones de otros años agrega la columna <b>anio</b> (por ejemplo <i>2025</i>) o elige el año aquí abajo. Sirve coma o punto y coma. Máximo 500 filas por carga.</p>
+      También se acepta <b>especialidad</b> y <b>seccion</b> (número) en columnas separadas. Para secciones de otros años agrega la columna <b>anio</b> (por ejemplo <i>2025</i>) o elige el año aquí abajo. Sirve coma o punto y coma. Máximo 500 filas por carga y 50 estudiantes por sección.</p>
       <div class="fila-btns" style="margin-bottom:12px"><div style="min-width:260px"><label for="anioDef">Año de la sección</label>
         <select id="anioDef"><option value="">Según el archivo (o la sección activa)</option></select></div></div>
       <div class="fila-btns"><button class="btn claro" id="plantilla" type="button">${ico('download')} Descargar plantilla</button>
