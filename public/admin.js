@@ -37,28 +37,35 @@ PAGINAS.usuarios = async yo => {
   const cargar = async () => { [D, S] = await Promise.all([api('/api/admin/usuarios'), api('/api/admin/secciones')]); };
   // Filtros de especialidad y sección (estudiantes y docentes). La sección de cada usuario viene como "Especialidad N"
   // (los docentes pueden tener varias, separadas por coma).
-  const partes = u => String(u.seccion || '').split(', ').filter(Boolean);
+  const idsDe = u => String(u.seccion_ids || '').split(',').filter(Boolean).map(Number);   // ids de las secciones del usuario
+  const secPorId = id => S.find(s => s.id === id);
   const llenarFiltros = () => {
-    const esp0 = $('#fesp').value, sec0 = $('#fsec').value;
+    const esp0 = $('#fesp').value, anio0 = $('#fanio').value, sec0 = $('#fsec').value;
     const esps = [...new Set(S.map(s => s.especialidad))].sort((x, y) => x.localeCompare(y, 'es'));
     $('#fesp').innerHTML = '<option value="">Todas las especialidades</option>' + esps.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
     $('#fesp').value = esps.includes(esp0) ? esp0 : '';
     const esp = $('#fesp').value;
-    const lista = S.filter(s => !esp || s.especialidad === esp).sort((x, y) => (x.especialidad + x.seccion).localeCompare(y.especialidad + y.seccion, 'es'));
-    $('#fsec').innerHTML = '<option value="">Todas las secciones</option>' + lista.map(s => `<option value="${esc(s.especialidad + ' ' + s.seccion)}">${esp ? 'Sección ' + s.seccion : esc(s.especialidad + ' ' + s.seccion)}</option>`).join('');
-    $('#fsec').value = lista.some(s => s.especialidad + ' ' + s.seccion === sec0) ? sec0 : '';
+    const anios = [...new Set(S.filter(s => !esp || s.especialidad === esp).map(s => String(s.anio)))].sort((x, y) => y - x);
+    $('#fanio').innerHTML = '<option value="">Todos los años</option>' + anios.map(y => `<option value="${y}">Año ${y}</option>`).join('');
+    $('#fanio').value = anios.includes(anio0) ? anio0 : '';
+    const anio = $('#fanio').value;
+    const lista = S.filter(s => (!esp || s.especialidad === esp) && (!anio || String(s.anio) === anio))
+      .sort((x, y) => y.anio - x.anio || (x.especialidad + x.seccion).localeCompare(y.especialidad + y.seccion, 'es', { numeric: true }));
+    $('#fsec').innerHTML = '<option value="">Todas las secciones</option>' + lista.map(s => `<option value="${s.id}">${esp ? 'Sección ' + s.seccion : esc(s.especialidad + ' ' + s.seccion)} (${s.anio})</option>`).join('');
+    $('#fsec').value = lista.some(s => String(s.id) === sec0) ? sec0 : '';
   };
   const vis = () => {
-    const q = $('#q').value.trim().toLowerCase(), e = $('#fest').value, esp = $('#fesp').value, sec = $('#fsec').value;
+    const q = $('#q').value.trim().toLowerCase(), e = $('#fest').value, esp = $('#fesp').value, anio = $('#fanio').value, sec = $('#fsec').value;
     const usaSec = !!TABS[rol].sec;
     return D.filter(u => u.rol === rol && (!e || String(u.activo ? 1 : 0) === e)
-      && (!usaSec || ((!esp || partes(u).some(p => p.replace(/\s+\d+$/, '') === esp)) && (!sec || partes(u).includes(sec))))
+      && (!usaSec || idsDe(u).some(id => { const s = secPorId(id); return s && (!esp || s.especialidad === esp) && (!anio || String(s.anio) === anio) && (!sec || String(id) === sec); })
+        || (usaSec && !esp && !anio && !sec))
       && `${u.nombre} ${u.correo} ${u.nie} ${u.id}`.toLowerCase().includes(q));
   };
   const pintar = () => {
     const T = TABS[rol], n = r => D.filter(u => u.rol === r).length;
     llenarFiltros();
-    $('#fesp').style.display = $('#fsec').style.display = T.sec ? '' : 'none';   // los administradores no tienen sección
+    $('#fesp').style.display = $('#fanio').style.display = $('#fsec').style.display = T.sec ? '' : 'none';   // los administradores no tienen sección
     $('#tabs').innerHTML = Object.entries(TABS).map(([r, t]) => `<button class="tab${r === rol ? ' on' : ''}" data-rol="${r}">${t.texto} <span>${n(r)}</span></button>`).join('');
     $('#ttabla').textContent = 'Lista de ' + T.texto.toLowerCase();
     $('#nuevo').innerHTML = ico('plus') + ' Nuevo ' + T.uno;
@@ -135,10 +142,10 @@ PAGINAS.usuarios = async yo => {
   };
 
   $('#nuevo').onclick = () => formulario(null);
-  $('#q').oninput = $('#fest').onchange = $('#fesp').onchange = $('#fsec').onchange = () => { pag = 1; pintar(); };
+  $('#q').oninput = $('#fest').onchange = $('#fesp').onchange = $('#fanio').onchange = $('#fsec').onchange = () => { pag = 1; pintar(); };
   $('#tabs').onclick = e => {
     const b = e.target.closest('[data-rol]'); if (!b) return;
-    rol = b.dataset.rol; location.hash = rol; pag = 1; $('#q').value = ''; $('#fesp').value = ''; $('#fsec').value = ''; pintar();
+    rol = b.dataset.rol; location.hash = rol; pag = 1; $('#q').value = ''; $('#fesp').value = ''; $('#fanio').value = ''; $('#fsec').value = ''; pintar();
   };
   $('#tb').onclick = async e => {
     const b = e.target.closest('button'); if (!b) return;
