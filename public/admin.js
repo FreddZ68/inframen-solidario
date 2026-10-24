@@ -503,12 +503,16 @@ PAGINAS.asignar = async yo => {
   $('#vCsv').innerHTML = `<div class="card bloque" style="margin-bottom:14px"><h2>Cargar archivo</h2>
       <p class="sub" style="margin:0 0 12px">Una fila por estudiante, con las columnas <b>nie</b>, <b>nombre</b> y <b>seccion</b> (el nombre de la sección como aparece en Gestión de Secciones, por ejemplo <i>Desarrollo de Software 1</i>).
       Si el NIE no existe, se <b>crea la cuenta</b> del estudiante con un PIN generado y se asigna a la sección. Si ya existe y no tiene sección, solo se asigna. A quien ya tiene sección no se le cambia.
-      También se acepta <b>especialidad</b> y <b>seccion</b> (número) en columnas separadas. Sirve coma o punto y coma. Máximo 500 filas por carga.</p>
+      También se acepta <b>especialidad</b> y <b>seccion</b> (número) en columnas separadas. Para secciones de otros años agrega la columna <b>anio</b> (por ejemplo <i>2025</i>) o elige el año aquí abajo. Sirve coma o punto y coma. Máximo 500 filas por carga.</p>
+      <div class="fila-btns" style="margin-bottom:12px"><div style="min-width:260px"><label for="anioDef">Año de la sección</label>
+        <select id="anioDef"><option value="">Según el archivo (o la sección activa)</option>${[...new Set(S.map(x => x.anio))].sort((p, q) => q - p).map(y => `<option value="${y}">${y}</option>`).join('')}</select></div></div>
       <div class="fila-btns"><button class="btn claro" id="plantilla" type="button">${ico('download')} Descargar plantilla</button>
       <label class="btn" style="cursor:pointer">${ico('file')} Elegir archivo CSV<input type="file" id="arch" accept=".csv,.txt,text/csv" hidden></label></div></div>
     <div id="prev"></div>`;
-  $('#plantilla').onclick = () => bajar('plantilla-estudiantes.csv', 'nie,nombre,seccion\n21045001,Nombre Apellido,' + (S[0] ? S[0].especialidad + ' ' + S[0].seccion : 'Desarrollo de Software 1') + '\n');
-  let filasCSV = [];
+  $('#plantilla').onclick = () => bajar('plantilla-estudiantes.csv', 'nie,nombre,seccion,anio\n21045001,Nombre Apellido,' + (S[0] ? S[0].especialidad + ' ' + S[0].seccion : 'Desarrollo de Software 1') + ',' + (S[0] ? S[0].anio : new Date().getFullYear()) + '\n');
+  let filasCSV = [], filasBase = [];
+  // Cada fila usa su propio año (columna "anio"); si no lo trae, el año elegido en pantalla; si tampoco, el servidor busca la sección activa.
+  const aplicarAnio = () => { const d = $('#anioDef').value; filasCSV = filasBase.map(f => ({ ...f, anio: f.anio || d })); };
   const csvCelda = x => `"${String(x ?? '').replace(/"/g, '""')}"`;
   const pintarPrev = (r, aplicado) => {
     const R = r.resumen, pill = e => e === 'nuevo' || e === 'ok' ? 'p-valid' : e === 'igual' ? 'p-pend' : 'e-ina';
@@ -516,8 +520,8 @@ PAGINAS.asignar = async yo => {
     $('#prev').innerHTML = `<div class="card bloque"><h2>${aplicado ? 'Resultado: ya se guardó en la base de datos' : 'Vista previa (aún no se guardó nada)'}</h2>
       <div class="fila-btns" style="margin-bottom:12px"><span class="pill p-valid">${R.nuevo} ${aplicado ? 'creados' : 'por crear'}</span><span class="pill p-valid">${R.ok} ${aplicado ? 'asignados' : 'por asignar'}</span>
         <span class="pill p-pend">${R.igual} ya estaban</span><span class="pill e-ina">${R.error} con error</span></div>
-      <div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Fila</th><th>NIE</th><th>Estudiante</th><th>Sección destino</th>${aplicado ? '<th>PIN</th>' : ''}<th>Estado</th></tr></thead><tbody>
-      ${r.filas.map(f => `<tr><td>${f.fila}</td><td>${esc(f.nie)}</td><td>${esc(f.nombre || '-')}</td><td>${esc(f.seccion || '-')}</td>
+      <div class="tabla-scroll"><table class="tabla-cards"><thead><tr><th>Fila</th><th>NIE</th><th>Estudiante</th><th>Sección destino</th><th>Año</th>${aplicado ? '<th>PIN</th>' : ''}<th>Estado</th></tr></thead><tbody>
+      ${r.filas.map(f => `<tr><td>${f.fila}</td><td>${esc(f.nie)}</td><td>${esc(f.nombre || '-')}</td><td>${esc(f.seccion || '-')}</td><td>${esc(f.anio || '-')}</td>
         ${aplicado ? `<td><b>${esc(f.pin || '-')}</b></td>` : ''}<td><span class="pill ${pill(f.estado)}">${esc(f.mensaje)}</span></td></tr>`).join('')}</tbody></table></div>
       <div class="fila-btns" style="margin-top:14px">
         ${!aplicado ? `<button class="btn" id="aplicar" ${hay ? '' : 'disabled'}>${ico('save')} Guardar ${hay} estudiantes en la base de datos</button>` : ''}
@@ -525,8 +529,8 @@ PAGINAS.asignar = async yo => {
         ${R.error ? '<button class="btn claro" id="errores" type="button">Descargar filas con error</button>' : ''}</div>
       ${aplicado && R.nuevo ? '<p class="aviso-txt" style="text-align:left;margin-top:10px">Descarga y guarda los PIN ahora para entregarlos a los estudiantes. Después podrás verlos en Gestión de Usuarios (Ver PIN).</p>' : ''}</div>`;
     poner($('#prev'));
-    if ($('#errores')) $('#errores').onclick = () => bajar('errores-carga.csv', 'fila,nie,nombre,seccion,motivo\n' + r.filas.filter(f => f.estado === 'error').map(f => [f.fila, f.nie, f.nombre, f.seccion, f.mensaje].map(csvCelda).join(',')).join('\n'));
-    if ($('#creds')) $('#creds').onclick = () => bajar('pin-estudiantes-nuevos.csv', 'nie,nombre,seccion,pin\n' + r.filas.filter(f => f.pin).map(f => [f.nie, f.nombre, f.seccion, f.pin].map(csvCelda).join(',')).join('\n'));
+    if ($('#errores')) $('#errores').onclick = () => bajar('errores-carga.csv', 'fila,nie,nombre,seccion,anio,motivo\n' + r.filas.filter(f => f.estado === 'error').map(f => [f.fila, f.nie, f.nombre, f.seccion, f.anio, f.mensaje].map(csvCelda).join(',')).join('\n'));
+    if ($('#creds')) $('#creds').onclick = () => bajar('pin-estudiantes-nuevos.csv', 'nie,nombre,seccion,anio,pin\n' + r.filas.filter(f => f.pin).map(f => [f.nie, f.nombre, f.seccion, f.anio, f.pin].map(csvCelda).join(',')).join('\n'));
     if ($('#aplicar')) $('#aplicar').onclick = async () => {
       if (!confirmar(`¿Guardar en la base de datos? Se crearán ${R.nuevo} estudiantes y se asignarán ${R.ok}.`)) return;
       $('#aplicar').disabled = true;
@@ -540,20 +544,26 @@ PAGINAS.asignar = async yo => {
     const m = leerCSV(await f.text());
     if (!m.length) return toast('El archivo está vacío');
     const nz = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    let ini = 0, iN = 0, iNom = 1, iS = 2, iE = -1;
+    let ini = 0, iN = 0, iNom = 1, iS = 2, iE = -1, iA = -1;
     if (!/^\d+$/.test(m[0][0])) {   // la primera fila es el encabezado
       const h = m[0].map(nz); ini = 1;
       iN = h.findIndex(x => /^(nie|carnet|carne|codigo)/.test(x)); iS = h.findIndex(x => /^(seccion|grupo)/.test(x));
-      iNom = h.findIndex(x => /^(nombre|estudiante|alumno)/.test(x)); iE = h.findIndex(x => /^especialidad/.test(x));
+      iNom = h.findIndex(x => /^(nombre|estudiante|alumno)/.test(x)); iE = h.findIndex(x => /^especialidad/.test(x)); iA = h.findIndex(x => /^(anio|ano|year)$/.test(x));
       if (iN < 0 || iS < 0) return toast('No encontré las columnas "nie" y "seccion" en la primera fila');
     } else if (m[0].length >= 4) { iE = 2; iS = 3; }
     else if (m[0].length === 2) { iNom = -1; iS = 1; }
-    filasCSV = m.slice(ini).map(f => ({ nie: (f[iN] || '').trim(), nombre: iNom >= 0 ? (f[iNom] || '') : '', seccion: [iE >= 0 ? f[iE] : '', f[iS] || ''].filter(Boolean).join(' ').trim() }));
-    if (!filasCSV.length) return toast('El archivo no tiene filas de datos');
-    if (filasCSV.length > 500) return toast('Máximo 500 filas por carga: divide el archivo');
+    filasBase = m.slice(ini).map(f => ({ nie: (f[iN] || '').trim(), nombre: iNom >= 0 ? (f[iNom] || '') : '', seccion: [iE >= 0 ? f[iE] : '', f[iS] || ''].filter(Boolean).join(' ').trim(), anio: iA >= 0 ? (f[iA] || '').trim() : '' }));
+    if (!filasBase.length) return toast('El archivo no tiene filas de datos');
+    if (filasBase.length > 500) { filasBase = []; return toast('Máximo 500 filas por carga: divide el archivo'); }
+    revisarCSV();
+  };
+  const revisarCSV = async () => {
+    if (!filasBase.length) return;
+    aplicarAnio();
     try { pintarPrev(await api('/api/admin/asignaciones/csv', { filas: filasCSV, aplicar: false }), false); }
     catch (err) { toast(err.message); }
   };
+  $('#anioDef').onchange = revisarCSV;   // al cambiar el año, se vuelve a revisar el archivo ya cargado
 
   /* ---------- Uno por uno: estudiantes que aún no tienen sección ---------- */
   $('#vManual').innerHTML = `<div class="nota">${ico('users', 'ico')}<span>Aquí aparecen los estudiantes ya creados. Solo se pueden asignar los que <b>no tienen sección</b>. Para crear un estudiante nuevo usa el archivo CSV o Usuarios → Estudiantes.</span></div>
