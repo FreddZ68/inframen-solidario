@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INFRAMEN - Mi Perfil</title>
+<link rel="icon" href="logo/logo1.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="perfil">
+<div id="nav"></div>
+<main>
+<div class="titulo"><div><h1>Mi Perfil</h1><p>Consulta tus datos, actualiza tu contacto y cambia tu PIN de acceso.</p></div></div>
+<div class="perfil">
+  <div class="card bloque" id="datos"></div>
+  <div class="card bloque" id="fcontacto" style="display:none"><h2>Datos de contacto</h2>
+    <p class="sub" style="margin-top:-6px">Tu NIE, nombre, especialidad, sección y horas solo los modifica la institución.</p>
+    <form><div class="campo-f"><label>Correo electrónico</label><input id="cc" type="email" maxlength="120" required></div>
+    <div class="campo-f"><label>Teléfono (opcional)</label><input id="ct" type="tel" maxlength="20" inputmode="tel"></div>
+    <button class="btn">Guardar datos</button></form></div>
+  <div class="card bloque" id="cpin"><h2>Cambiar PIN</h2>
+    <form id="fpin"><div class="campo-f"><label>PIN actual</label><input id="pa" type="password" inputmode="numeric" maxlength="4" required></div>
+    <div class="campo-f"><label>PIN nuevo (4 números)</label><input id="pn" type="password" inputmode="numeric" maxlength="4" required></div>
+    <div class="campo-f"><label>Confirmar PIN nuevo</label><input id="pc" type="password" inputmode="numeric" maxlength="4" required></div>
+    <button class="btn">Guardar PIN</button></form></div>
+</div>
+</main>
+<script src="common.js"></script>
+</body>
+</html>
