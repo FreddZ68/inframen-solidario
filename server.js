@@ -49,6 +49,8 @@ const CARPETA_ARCHIVOS = path.join(process.env.UPLOADS_DIR || path.join(__dirnam
 fs.mkdirSync(CARPETA_ARCHIVOS, { recursive: true });
 const MAX_ARCHIVO = (Number(process.env.MAX_ARCHIVO_MB) || 10) * 1024 * 1024;
 const MAX_ARCHIVOS_PROYECTO = 30;
+// Máximo de horas por registro (perfil del estudiante). Esas horas llevan origen = 'perfil' y no cuentan para el límite semanal de la carga masiva.
+const MAX_HORAS_REGISTRO = 40;
 const EXT_ARCHIVO = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'odt', 'ods', 'odp', 'png', 'jpg', 'jpeg', 'zip']);
 const ROLES = ['administrador', 'docente', 'alumno'];
 const ESTADOS = ['presente', 'tarde', 'falto', 'permiso'];
@@ -239,7 +241,7 @@ app.post('/api/logout', (req, res) => {
 
 // Meta de horas y datos de la institución (los necesitan las tres vistas)
 app.get('/api/config', ANY, async (req, res) => {
-  try { res.json({ ...await leerConfig(), horas_permiso: HORAS_PERMISO }); } catch (e) { fallo(res, e); }
+  try { res.json({ ...await leerConfig(), horas_permiso: HORAS_PERMISO, max_horas_registro: MAX_HORAS_REGISTRO }); } catch (e) { fallo(res, e); }
 });
 
 /* ================== Mi perfil (todos los roles) ================== */
@@ -424,13 +426,13 @@ app.post('/api/admin/usuarios/:id/pin', ADMIN, async (req, res) => {
   } catch (e) { fallo(res, e); }
 });
 
-// Ver el PIN: de estudiantes y docentes (no de administradores) y solo cuando se pide
+// Ver el PIN de cualquier usuario (estudiante, docente o administrador) y solo cuando se pide
 app.get('/api/admin/usuarios/:id/pin', ADMIN, async (req, res) => {
   try {
     const id = idOk(req.params.id);
     if (!id) throw new ErrUsuario('Usuario no válido');
-    const [[u]] = await pool.query("SELECT pin_cifrado FROM usuarios WHERE id = ? AND rol IN ('alumno', 'docente')", [id]);
-    if (!u) throw new ErrUsuario('Solo se puede consultar el PIN de estudiantes y docentes');
+    const [[u]] = await pool.query("SELECT pin_cifrado FROM usuarios WHERE id = ?", [id]);
+    if (!u) throw new ErrUsuario('Usuario no encontrado');
     if (!u.pin_cifrado) throw new ErrUsuario('Este usuario no tiene el PIN guardado. Usa "Restablecer PIN" para generar uno nuevo.');
     res.json({ pin: descifrarPin(u.pin_cifrado) });
   } catch (e) { fallo(res, e); }
@@ -1051,12 +1053,12 @@ app.post('/api/admin/asistencia-docentes', ADMIN, async (req, res) => {
 // 0 = sin límite semanal.
 async function limiteAlumno(db, alumnoId, cfg) {
   const [[u]] = await db.query('SELECT limite_semanal FROM usuarios WHERE id = ?', [alumnoId]);
-  return u && u.limite_semanal !== null ? Number(u.limite_semanal) : cfg.max_horas_semana;
+  return cfg.max_horas_semana;   // un solo límite para todos: el que el administrador define en Institución (los límites personales antiguos ya no se usan)
 }
 
 async function cupoAlumno(db, alumnoId, fecha, cfg, ignorarSemana = false) {
   const [[sem]] = await db.query(
-    "SELECT COALESCE(SUM(horas),0) AS h FROM registro_horas WHERE alumno_id = ? AND estado = 'validado' AND YEARWEEK(fecha,1) = YEARWEEK(?,1)", [alumnoId, fecha]);
+    "SELECT COALESCE(SUM(horas),0) AS h FROM registro_horas WHERE alumno_id = ? AND estado = 'validado' AND (origen IS NULL OR origen <> 'perfil') AND YEARWEEK(fecha,1) = YEARWEEK(?,1)", [alumnoId, fecha]);
   const [[tot]] = await db.query("SELECT COALESCE(SUM(horas),0) AS h FROM registro_horas WHERE alumno_id = ? AND estado <> 'rechazado'", [alumnoId]);
   const limite = await limiteAlumno(db, alumnoId, cfg);
   const porMeta = cfg.meta_horas - Number(tot.h);
@@ -1083,19 +1085,19 @@ async function datosRegistro(b, db = pool) {
 }
 
 const decimas = n => Math.abs(n * 10 - Math.round(n * 10)) < 1e-6;   // se aceptan décimas: 2.3, 1.5, 0.1...
-const horasOk = h => Number.isFinite(h) && h > 0 && h <= 40 && decimas(h);
+const horasOk = h => Number.isFinite(h) && h > 0 && h <= MAX_HORAS_REGISTRO && decimas(h);
 
 // opciones.ignorarSemana: desde el perfil del estudiante no se aplica el límite semanal (solo la meta total)
 async function insertarHoras(conn, a, d, horas, userId, cfg, opciones = {}) {
-  if (!horasOk(horas)) throw new ErrUsuario('Las horas deben estar entre 0.1 y 40 (con un decimal, por ejemplo 2.3)');
+  if (!horasOk(horas)) throw new ErrUsuario(`Las horas deben estar entre 0.1 y ${MAX_HORAS_REGISTRO} (con un decimal, por ejemplo 2.3)`);
   const cupo = await cupoAlumno(conn, a.id, d.fecha, cfg, !!opciones.ignorarSemana);
   if (horas > cupo) throw new ErrUsuario(opciones.ignorarSemana
     ? `${a.nombre} solo puede recibir ${cupo} h más (meta de ${cfg.meta_horas} h)`
     : `${a.nombre} solo puede registrar ${cupo} h en esa semana (límite semanal del estudiante o meta de ${cfg.meta_horas} h)`);
   await conn.query(
-    `INSERT INTO registro_horas (alumno_id, seccion_id, fecha, actividad_id, actividad, descripcion, horas, estado, registrado_por)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [a.id, a.seccion_id, d.fecha, d.actividadId, d.actividad, d.descripcion, horas, d.estado, userId]);
+    `INSERT INTO registro_horas (alumno_id, seccion_id, fecha, actividad_id, actividad, descripcion, horas, estado, registrado_por, origen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [a.id, a.seccion_id, d.fecha, d.actividadId, d.actividad, d.descripcion, horas, d.estado, userId, opciones.origen || null]);
 }
 
 // Listado de estudiantes (de las secciones del docente; el administrador ve todos) con su avance
@@ -1110,7 +1112,7 @@ app.get('/api/docente/alumnos', STAFF, async (req, res) => {
       SELECT x.id, x.nie, x.nombre, x.limite_semanal, s.id AS seccion_id, s.especialidad, s.seccion, s.anio,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'validado') AS validadas,
         (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'pendiente') AS pendientes,
-        (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'validado' AND YEARWEEK(r.fecha,1) = YEARWEEK(?,1)) AS semana
+        (SELECT COALESCE(SUM(r.horas),0) FROM registro_horas r WHERE r.alumno_id = x.id AND r.estado = 'validado' AND (r.origen IS NULL OR r.origen <> 'perfil') AND YEARWEEK(r.fecha,1) = YEARWEEK(?,1)) AS semana
       FROM usuarios x
       JOIN alumno_seccion al ON al.alumno_id = x.id
       JOIN secciones s ON s.id = al.seccion_id
@@ -1119,8 +1121,8 @@ app.get('/api/docente/alumnos', STAFF, async (req, res) => {
     res.json(rows.map(r => ({
       id: r.id, nie: r.nie, nombre: r.nombre, seccion_id: r.seccion_id, grupo: r.especialidad + ' ' + r.seccion, anio: r.anio,   // grupo queda sin año: los PDF toman de ahí el número de sección
       validadas: Number(r.validadas), pendientes: Number(r.pendientes), semana: Number(r.semana),
-      limite: r.limite_semanal !== null ? Number(r.limite_semanal) : cfg.max_horas_semana,   // límite semanal efectivo (0 = sin límite)
-      limite_propio: r.limite_semanal !== null,
+      limite: cfg.max_horas_semana,   // límite semanal (0 = sin límite)
+      limite_propio: false,
     })));
   } catch (e) { fallo(res, e); }
 });
@@ -1144,8 +1146,8 @@ app.get('/api/docente/alumnos/:id', STAFF, async (req, res) => {
     const regs = registros.map(r => ({ ...r, horas: Number(r.horas) }));
     res.json({
       alumno: { id: a.id, nie: a.nie, nombre: a.nombre, activo: !!a.activo, grupo: a.seccion_id ? a.especialidad + ' ' + a.seccion : '-', anio: a.anio || null },
-      meta: cfg.meta_horas, max_semana: a.limite_semanal !== null ? Number(a.limite_semanal) : cfg.max_horas_semana,
-      limite_propio: a.limite_semanal !== null ? Number(a.limite_semanal) : null, limite_general: cfg.max_horas_semana,
+      meta: cfg.meta_horas, max_semana: cfg.max_horas_semana,
+      limite_propio: null, limite_general: cfg.max_horas_semana,
       validadas: regs.filter(r => r.estado === 'validado').reduce((s, r) => s + r.horas, 0),
       pendientes: regs.filter(r => r.estado === 'pendiente').reduce((s, r) => s + r.horas, 0),
       registros: regs, asistencia,
@@ -1165,7 +1167,8 @@ app.post('/api/docente/alumnos/:id/horas', STAFF, async (req, res) => {
     const d = await datosRegistro(req.body, conn);
     const cfg = await leerConfig(conn);
     await conn.beginTransaction();
-    await insertarHoras(conn, a, d, Number(req.body.horas), u.id, cfg);
+    // Desde el perfil: hasta 40 h por registro y sin el límite semanal (solo se detiene en la meta total)
+    await insertarHoras(conn, a, d, Number(req.body.horas), u.id, cfg, { ignorarSemana: true, origen: 'perfil' });
     await conn.commit();
     res.json({ ok: true });
   } catch (e) {
@@ -1215,14 +1218,16 @@ app.post('/api/docente/horas/validar-fecha', STAFF, async (req, res) => {
     let n = 0, h = 0, omitidos = 0;
     for (const aid of permitidos) {
       const limite = await limiteAlumno(conn, aid, cfg);
-      const [pend] = await conn.query("SELECT id, horas FROM registro_horas WHERE alumno_id = ? AND estado = 'pendiente' AND fecha = ? ORDER BY id", [aid, fecha]);
+      const [pend] = await conn.query("SELECT id, horas, origen FROM registro_horas WHERE alumno_id = ? AND estado = 'pendiente' AND fecha = ? ORDER BY id", [aid, fecha]);
       if (!pend.length) continue;
-      const [[sem]] = await conn.query("SELECT COALESCE(SUM(horas),0) AS h FROM registro_horas WHERE alumno_id = ? AND estado = 'validado' AND YEARWEEK(fecha,1) = YEARWEEK(?,1)", [aid, fecha]);
+      const [[sem]] = await conn.query("SELECT COALESCE(SUM(horas),0) AS h FROM registro_horas WHERE alumno_id = ? AND estado = 'validado' AND (origen IS NULL OR origen <> 'perfil') AND YEARWEEK(fecha,1) = YEARWEEK(?,1)", [aid, fecha]);
       let acum = Number(sem.h);
       for (const r of pend) {
-        if (limite > 0 && Math.round((acum + Number(r.horas)) * 10) / 10 > limite) { omitidos++; continue; }   // pasaría el máximo semanal
+        const delPerfil = r.origen === 'perfil';   // lo registrado desde el perfil no se limita por semana
+        if (!delPerfil && limite > 0 && Math.round((acum + Number(r.horas)) * 10) / 10 > limite) { omitidos++; continue; }   // pasaría el máximo semanal
         await conn.query("UPDATE registro_horas SET estado = 'validado', revisado_por = ?, revisado_en = NOW() WHERE id = ?", [u.id, r.id]);
-        acum += Number(r.horas); n++; h += Number(r.horas);
+        if (!delPerfil) acum += Number(r.horas);
+        n++; h += Number(r.horas);
       }
     }
     await conn.commit();
@@ -1357,7 +1362,7 @@ async function resumenAlumno(id) {
   return {
     cfg, validadas, pendientes: Number(t.pendientes), rechazadas: Number(t.rechazadas),
     restantes: Math.max(0, cfg.meta_horas - validadas),
-    limite_semanal: a.limite_semanal !== null ? Number(a.limite_semanal) : cfg.max_horas_semana,
+    limite_semanal: cfg.max_horas_semana,
     // Requisitos de la constancia (se comprueban aquí, en el servidor): meta alcanzada con horas validadas,
     // cuenta activa y sección asignada. Para agregar otra condición institucional, súmala a esta línea.
     constancia: validadas >= cfg.meta_horas && !!a.activo && !!a.seccion_id,
