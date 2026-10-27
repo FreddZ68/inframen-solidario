@@ -133,8 +133,8 @@ PAGINAS.usuarios = async yo => {
       <dt>Sección</dt><dd>${esc(u.seccion || '-')}</dd><dt>Estado</dt><dd>${u.activo ? 'Activo' : 'Inactivo'}</dd></dl>
       <p class="pinout" id="pinout"></p>
       <div class="inline-pin"><input id="pinfijo" inputmode="numeric" maxlength="4" placeholder="PIN nuevo (vacío = aleatorio)"><button class="btn claro" id="npin" type="button">${ico('rotate')} Restablecer PIN</button></div>
-      ${u.rol !== 'administrador' ? '<div class="acciones-modal" style="margin-top:10px"><button class="btn claro" id="vpin" type="button">' + ico('eye') + ' Ver PIN actual</button></div>' : ''}`);
-    if (u.rol !== 'administrador') $('#vpin', m).onclick = async () => { try { $('#pinout', m).textContent = 'PIN: ' + (await api(`/api/admin/usuarios/${u.id}/pin`)).pin; } catch (e) { toast(e.message); } };
+      <div class="acciones-modal" style="margin-top:10px"><button class="btn claro" id="vpin" type="button">${ico('eye')} Ver PIN actual</button></div>`);
+    $('#vpin', m).onclick = async () => { try { $('#pinout', m).textContent = 'PIN: ' + (await api(`/api/admin/usuarios/${u.id}/pin`)).pin; } catch (e) { toast(e.message); } };
     $('#pinfijo', m).oninput = e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); };
     $('#npin', m).onclick = async () => {
       if (!confirmar('¿Cambiar el PIN? El anterior dejará de funcionar.')) return;
