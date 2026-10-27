@@ -129,8 +129,8 @@ PAGINAS.estudiante = async yo => {
         ${pillEstadoHoras(P.validadas)}
         <div class="mini-stats"><div class="mini"><small>Validadas</small><b>${horasTxt(P.validadas)}</b></div><div class="mini"><small>Pendientes</small><b>${horasTxt(P.pendientes)}</b></div>
         <div class="mini"><small>Faltan</small><b>${horasTxt(falta)}</b></div><div class="mini"><small>Meta</small><b>${P.meta} h</b></div></div>
-        <div class="mini" style="width:100%;text-align:left"><small>Límite semanal de horas</small><b>${P.max_semana > 0 ? horasTxt(P.max_semana) : 'Sin límite'}</b>
-          <small>${P.limite_propio !== null ? 'Personalizado para este estudiante' : 'Límite general de la institución'}</small></div>
+        <div class="mini" style="width:100%;text-align:left"><small>Límite semanal en Registro de horas</small><b>${P.max_semana > 0 ? horasTxt(P.max_semana) : 'Sin límite'}</b>
+          <small>${P.limite_propio !== null ? 'Personalizado para este estudiante' : 'Límite general de la institución'} · aquí puedes registrar hasta ${CFG.max_horas_registro || 40} h por registro</small></div>
         <div class="mini-stats"><div class="mini"><small>Presentes</small><b>${as.presente}</b></div><div class="mini"><small>Tardanzas</small><b>${as.tarde}</b></div>
         <div class="mini"><small>Ausencias</small><b>${as.falto}</b></div><div class="mini"><small>Permisos</small><b>${as.permiso}</b></div></div></div>
       <div class="card bloque"><h2>Historial de horas <button class="btn" id="agregar" ${a.activo ? '' : 'disabled'}>${ico('plus')} Agregar registro de horas</button></h2>
@@ -168,12 +168,11 @@ PAGINAS.estudiante = async yo => {
     };
   };
 
-  // Cuántas horas puede recibir en la semana de la fecha elegida (las rechazadas no ocupan cupo)
-  const cupo = f => {
-    const activos = P.registros.filter(r => r.estado !== 'rechazado');
-    const sem = activos.filter(r => lunes(r.fecha) === lunes(f)).reduce((s, r) => s + r.horas, 0);
-    const tot = activos.reduce((s, r) => s + r.horas, 0);
-    return Math.max(0, Math.round(Math.min(P.meta - tot, P.max_semana > 0 ? P.max_semana - sem : Infinity) * 10) / 10);
+  // Desde el perfil se puede registrar hasta MAXREG horas por registro, sin el límite semanal; solo se detiene en la meta total
+  const MAXREG = CFG.max_horas_registro || 40;
+  const cupo = () => {
+    const tot = P.registros.filter(r => r.estado !== 'rechazado').reduce((s, r) => s + r.horas, 0);
+    return Math.max(0, Math.round(Math.min(P.meta - tot, MAXREG) * 10) / 10);
   };
 
   const formulario = () => {
@@ -188,7 +187,7 @@ PAGINAS.estudiante = async yo => {
     $('#hf', m).value = hoy();
     const pistas = () => {
       const c = cupo($('#hf', m).value || hoy());
-      $('#hcupo', m).textContent = c > 0 ? `Puede registrar hasta ${horasTxt(c)} en esa semana.` : 'No tiene horas disponibles en esa semana (límite semanal o meta alcanzada).';
+      $('#hcupo', m).textContent = c > 0 ? `Puedes registrar hasta ${horasTxt(c)} en este registro (máximo ${MAXREG} h por registro).` : 'Este estudiante ya alcanzó la meta de horas.';
       $('#hh', m).max = c;
     };
     $('#hf', m).onchange = pistas; pistas();
